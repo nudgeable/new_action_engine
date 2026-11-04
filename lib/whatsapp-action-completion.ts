@@ -16,7 +16,8 @@
  * window, so they need no template.
  *
  * Settlement runs in complete_action_for_user
- * (supabase/migrations/085_complete_action_for_user.sql), which calls the
+ * (supabase/migrations/085_complete_action_for_user.sql; 087 redefines it to
+ * mark user_actions.completed_via = 'whatsapp'), which calls the
  * same RPCs as completeAction() in app/actions/user-actions.ts. The profile
  * points and feed event below mirror the rest of completeAction — keep the
  * two in sync.
