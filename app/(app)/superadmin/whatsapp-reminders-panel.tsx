@@ -19,6 +19,7 @@ import {
   getWhatsAppReminderLogs,
   sendWhatsAppRemindersNow,
   type UpcomingWhatsAppReminder,
+  type WhatsAppMessageKind,
   type WhatsAppReminderLog,
   type WhatsAppReminderOverview,
 } from "@/app/actions/whatsapp-reminders-admin";
@@ -171,6 +172,7 @@ function LogRow({ log }: { log: WhatsAppReminderLog }) {
 }
 
 export default function WhatsAppRemindersPanel() {
+  const [kind, setKind] = useState<WhatsAppMessageKind>("reminder");
   const [overview, setOverview] = useState<WhatsAppReminderOverview | null>(null);
   const [logs, setLogs] = useState<WhatsAppReminderLog[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -185,7 +187,7 @@ export default function WhatsAppRemindersPanel() {
     setLoading(true);
     setError(null);
     try {
-      const [queue, history] = await Promise.all([getUpcomingWhatsAppReminders(), getWhatsAppReminderLogs()]);
+      const [queue, history] = await Promise.all([getUpcomingWhatsAppReminders(kind), getWhatsAppReminderLogs()]);
       if ("error" in queue) setError(queue.error);
       else {
         setOverview(queue.data);
@@ -200,8 +202,10 @@ export default function WhatsAppRemindersPanel() {
   }
 
   useEffect(() => {
+    setSelectedIds(new Set());
+    setResult(null);
     void load();
-  }, []);
+  }, [kind]);
 
   const reminders = overview?.reminders ?? [];
   const visibleReminders = useMemo(
@@ -237,13 +241,13 @@ export default function WhatsAppRemindersPanel() {
     setError(null);
     setResult(null);
     try {
-      const response = await sendWhatsAppRemindersNow(visibleSelectedIds);
+      const response = await sendWhatsAppRemindersNow(visibleSelectedIds, kind);
       if ("error" in response) {
         setError(response.error);
         return;
       }
       setResult(
-        `${response.sent} WhatsApp reminder${response.sent === 1 ? "" : "s"} sent${
+        `${response.sent} WhatsApp ${kind}${response.sent === 1 ? "" : "s"} sent${
           response.failed ? ` · ${response.failed} failed` : ""
         }${response.skipped ? ` · ${response.skipped} skipped` : ""}. Delivery status appears in the history below.`
       );
@@ -268,26 +272,46 @@ export default function WhatsAppRemindersPanel() {
         <div className="flex items-center justify-between p-4 font-black uppercase tracking-tight">
           <span className="flex items-center gap-2">
             <MessageCircle size={18} />
-            Upcoming WhatsApp reminders
+            {kind === "recap" ? "Upcoming WhatsApp Friday recaps" : "Upcoming WhatsApp reminders"}
             {overview && (
               <span className="rounded-full bg-black px-2 py-0.5 text-xs font-black text-white">
                 {reminders.filter((r) => r.canSend).length} ready
               </span>
             )}
           </span>
+          <div className="flex gap-1" role="group" aria-label="WhatsApp message type">
+            {(["reminder", "recap"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setKind(option)}
+                disabled={loading || sending}
+                aria-pressed={kind === option}
+                className={`rounded-lg border-2 border-black px-3 py-1.5 text-xs font-bold uppercase disabled:opacity-50 ${
+                  kind === option ? "bg-black text-white" : "bg-white text-black hover:bg-emerald-100"
+                }`}
+              >
+                {option === "recap" ? "Friday recap" : "Reminders"}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="border-t-2 border-black">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-200 bg-emerald-100 px-4 py-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-                Sent with the reminder email · same days, same actions · 11:30 AM IST
+                {kind === "recap"
+                  ? "Sent with the Friday recap email · same actions · Fridays 12:30 PM IST"
+                  : `Sent with the reminder email · same actions · 11:30 AM IST${
+                      overview?.recapEnabled ? " · the recap replaces Friday's reminder" : ""
+                    }`}
               </p>
               <p className="mt-1 text-sm text-emerald-800">
                 {overview
                   ? `${overview.whatsappOn} of ${overview.activePlans} active plans have WhatsApp on. `
                   : ""}
-                Sending now can be repeated and does not use up the automatic reminder.
+                Sending now can be repeated and does not use up the automatic send.
               </p>
             </div>
             <button
@@ -306,6 +330,15 @@ export default function WhatsAppRemindersPanel() {
               <p className="text-xs font-bold text-amber-800">
                 WhatsApp sending isn&apos;t configured on this deployment — set WHATSAPP_PHONE_NUMBER_ID and
                 WHATSAPP_ACCESS_TOKEN. Nothing will be sent until then.
+              </p>
+            </div>
+          )}
+
+          {overview && kind === "recap" && !overview.recapEnabled && (
+            <div className="mx-4 mt-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2">
+              <p className="text-xs font-bold text-amber-800">
+                The automatic Friday recap is off, so Friday reminders still go out. Set
+                WHATSAPP_WEEKLY_RECAP_ENABLED=true once Meta has approved plan_recap_1 to plan_recap_3.
               </p>
             </div>
           )}

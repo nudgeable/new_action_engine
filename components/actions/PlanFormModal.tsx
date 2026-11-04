@@ -161,7 +161,7 @@ export default function PlanFormModal({
                   checked={values.whatsappOn}
                   onChange={(event) => setValues((current) => ({ ...current, whatsappOn: event.target.checked }))}
                 />
-                <span>Get reminders on WhatsApp <em>· reply STOP anytime</em></span>
+                <span>Get reminders and a Friday recap on WhatsApp <em>· reply STOP anytime</em></span>
               </label>
             ) : <span />}
             <span className="plan-form-count">{values.skillGoal.length}/{MAX_ANSWER_LENGTH}</span>

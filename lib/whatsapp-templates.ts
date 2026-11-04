@@ -49,16 +49,44 @@
  * Should a reminder ever have more than three actions, it uses
  * plan_reminder_3 with "(+N more)" on the last line, and only the first
  * three get Done buttons.
+ *
+ * The Friday recap has its own set, plan_recap_1 … plan_recap_3 (UTILITY, en),
+ * with the same anchors. plan_recap_3:
+ *
+ *   Body:    Hi {{1}} 👋, this is your scheduled weekly reminder. These actions
+ *            from your {{2}} plan are due this week and are still open:
+ *
+ *            1) {{3}}
+ *
+ *            2) {{4}}
+ *
+ *            3) {{5}}
+ *
+ *            If you have completed them, click a button below to update their
+ *            status as done.
+ *   Footer:  Reply STOP to turn off WhatsApp reminders
+ *   Buttons: QUICK_REPLY "All done", "Some done"
+ *
+ * plan_recap_1 is singular and unnumbered, with one "Action done" button that
+ * works like a reminder's. Two buttons rather than one per action plus "All
+ * done": four buttons would collapse behind "See all options".
  */
-import { doneButtonPayload } from "@/lib/whatsapp-action-completion";
+import { doneButtonPayload, recapAllPayload, recapSomePayload } from "@/lib/whatsapp-action-completion";
 
 export const ACTION_REMINDER_LANGUAGE = "en";
 /** Equals MAX_WEEKLY_ACTIONS in lib/personal-action-generation.ts. */
 export const MAX_ACTIONS_PER_TEMPLATE = 3;
 
+function templateSlots(actionCount: number): number {
+  return Math.min(Math.max(actionCount, 1), MAX_ACTIONS_PER_TEMPLATE);
+}
+
 export function actionReminderTemplateName(actionCount: number): string {
-  const slots = Math.min(Math.max(actionCount, 1), MAX_ACTIONS_PER_TEMPLATE);
-  return `plan_reminder_${slots}`;
+  return `plan_reminder_${templateSlots(actionCount)}`;
+}
+
+export function weeklyRecapTemplateName(actionCount: number): string {
+  return `plan_recap_${templateSlots(actionCount)}`;
 }
 
 /** Template parameters can't contain newlines/tabs or 4+ consecutive spaces. */
@@ -130,6 +158,40 @@ export function buildActionReminder(params: {
         ],
       },
       ...doneButtons,
+    ],
+  };
+}
+
+function quickReply(index: number, payload: string): TemplateComponent {
+  return { type: "button", sub_type: "quick_reply", index: String(index), parameters: [{ type: "payload", payload }] };
+}
+
+/**
+ * The template and send-time components for one Friday recap. Callers pass
+ * the plan's current actions; at least one is required.
+ */
+export function buildWeeklyRecap(params: {
+  firstName: string | null;
+  companyName: string | null;
+  actions: { id: string; title: string }[];
+}): TemplateMessage {
+  if (!params.actions.length) throw new Error("A weekly recap needs at least one action");
+  const lines = actionLines(params.actions.map((action) => action.title));
+  const actionIds = params.actions.slice(0, lines.length).map((action) => action.id);
+  return {
+    template: { name: weeklyRecapTemplateName(lines.length), language: ACTION_REMINDER_LANGUAGE },
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: sanitizeTemplateParam(params.firstName || "there", 40) },
+          { type: "text", text: sanitizeTemplateParam(params.companyName || "Nudgeable", 40) },
+          ...lines.map((text) => ({ type: "text" as const, text })),
+        ],
+      },
+      ...(actionIds.length === 1
+        ? [quickReply(0, doneButtonPayload(actionIds, 1))]
+        : [quickReply(0, recapAllPayload(actionIds)), quickReply(1, recapSomePayload(actionIds))]),
     ],
   };
 }
