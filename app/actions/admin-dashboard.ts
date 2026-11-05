@@ -12,7 +12,7 @@
  * Wallet rollup math.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
-import { elapsedWeekCount, resolveCohortWeekAnchors, sharedWeekAnchor, weekNumberFor, weekRangeFields } from "@/lib/cohort-week";
+import { chartWeekCount, resolveCohortMaxWeeks, resolveCohortWeekAnchors, sharedWeekAnchor, weekNumberFor, weekRangeFields } from "@/lib/cohort-week";
 import {
   getAdminContext,
   loadCommitmentWalletByCohort,
@@ -136,8 +136,6 @@ export async function getActionCompletionWeeklyTrend(
       .in("user_id", userIds)
       .not("scheduled_at", "is", null);
 
-    const maxWeek = elapsedWeekCount(anchors.values());
-
     const weeklyMap = new Map<number, { due: number; completed: number }>();
     for (const row of (uaRows ?? []) as { cohort_id: string | null; status: string; scheduled_at: string }[]) {
       const anchor = row.cohort_id ? anchors.get(row.cohort_id) : undefined;
@@ -148,6 +146,8 @@ export async function getActionCompletionWeeklyTrend(
       if (row.status === "success") bucket.completed += 1;
       weeklyMap.set(week, bucket);
     }
+
+    const maxWeek = chartWeekCount(anchors, await resolveCohortMaxWeeks(admin, cohortIds), weeklyMap.keys());
 
     const displayAnchor = sharedWeekAnchor(anchors.values());
     const entries: ActionWeeklyTrendEntry[] = [];
@@ -481,7 +481,17 @@ export async function getBatchCommitmentWeeklyTrend(
       eventsByPlan.set(e.plan_id, list);
     }
 
-    const maxWeek = elapsedWeekCount(anchors.values());
+    // Only misses move the score, so a later non-miss event doesn't extend the axis.
+    const scoreWeeks: number[] = [];
+    for (const plan of planRows) {
+      const anchor = anchors.get(plan.cohort_id);
+      if (!anchor) continue;
+      scoreWeeks.push(weekNumberFor(new Date(plan.finalised_at), anchor));
+      for (const e of eventsByPlan.get(plan.id) ?? []) {
+        if (e.missed) scoreWeeks.push(weekNumberFor(new Date(e.settledAt), anchor));
+      }
+    }
+    const maxWeek = chartWeekCount(anchors, await resolveCohortMaxWeeks(admin, cohortIds), scoreWeeks);
 
     // Same formula as get_my_commitment_wallet() / the /wallet page (see walletScorePct) —
     // outstanding misses only, tracked cumulatively per week.
@@ -801,9 +811,9 @@ export async function getEmailOpenRates(
     };
 
     const displayAnchor = sharedWeekAnchor(anchors.values());
-    // Same 1..elapsed-week axis as the other dashboard charts, so a new week
-    // is visible even before any reminder has gone out that week.
-    const maxWeek = Math.max(elapsedWeekCount(anchors.values()), ...weeklyMap.keys(), 1);
+    // Same axis as the other dashboard charts, so a new week is visible even
+    // before any reminder has gone out that week.
+    const maxWeek = chartWeekCount(anchors, await resolveCohortMaxWeeks(admin, cohortIds), weeklyMap.keys());
     const weekly: EmailOpenWeeklyEntry[] = weeklyMap.size
       ? Array.from({ length: maxWeek }, (_, i) => {
           const week = i + 1;

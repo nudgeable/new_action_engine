@@ -37,6 +37,31 @@ export function elapsedWeekCount(anchors: Iterable<Date>, now = new Date()): num
   return maxWeek;
 }
 
+/**
+ * Last week a chart axis should show. Each batch counts up to its current week
+ * but stops at its programme length (`cohorts.max_weeks`; null = no limit), so
+ * a finished batch stops gaining empty weeks. `dataWeeks` extends the axis so
+ * activity after the programme ends stays visible; weeks that haven't started
+ * yet are ignored.
+ */
+export function chartWeekCount(
+  anchors: Map<string, Date>,
+  maxWeeks: Map<string, number | null>,
+  dataWeeks: Iterable<number> = [],
+  now = new Date()
+): number {
+  let lastWeek = 1;
+  for (const [cohortId, anchor] of anchors) {
+    const elapsed = elapsedWeekCount([anchor], now);
+    lastWeek = Math.max(lastWeek, Math.min(elapsed, maxWeeks.get(cohortId) ?? elapsed));
+  }
+  const elapsedWeeks = elapsedWeekCount(anchors.values(), now);
+  for (const week of dataWeeks) {
+    if (week <= elapsedWeeks) lastWeek = Math.max(lastWeek, week);
+  }
+  return lastWeek;
+}
+
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function parseIstDate(istDate: string): { year: number; month: number; day: number } | null {
@@ -102,6 +127,18 @@ export function sharedWeekAnchor(anchors: Iterable<Date>): Date | null {
     }
   }
   return shared;
+}
+
+/** Programme length per cohort (`cohorts.max_weeks`), for `chartWeekCount`. */
+export async function resolveCohortMaxWeeks(
+  admin: Admin,
+  cohortIds: string[]
+): Promise<Map<string, number | null>> {
+  if (!cohortIds.length) return new Map();
+  const { data } = await admin.from("cohorts").select("id, max_weeks").in("id", cohortIds);
+  return new Map(
+    ((data ?? []) as { id: string; max_weeks: number | null }[]).map((c) => [c.id, c.max_weeks])
+  );
 }
 
 /**

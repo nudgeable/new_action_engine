@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { elapsedWeekCount, resolveCohortWeekAnchors, sharedWeekAnchor, weekAnchorFromTimestamp, weekNumberFor, weekRangeFields } from "@/lib/cohort-week";
+import { chartWeekCount, resolveCohortMaxWeeks, resolveCohortWeekAnchors, sharedWeekAnchor, weekAnchorFromTimestamp, weekNumberFor, weekRangeFields } from "@/lib/cohort-week";
 
 /** Exported so app/actions/admin-dashboard.ts can reuse the same role/company
  * resolution instead of duplicating it — "use server" files may only export
@@ -820,7 +820,13 @@ export async function getWeeklyActionChartData(companyId?: string): Promise<{
         cohortRows.map((c) => c.id)
       );
 
-    let maxWeek = elapsedWeekCount(anchors.values());
+    let maxWeek = chartWeekCount(
+      anchors,
+      await resolveCohortMaxWeeks(
+        admin,
+        cohortRows.map((c) => c.id)
+      )
+    );
 
     const weeklyBuckets = new Map<number, ReturnType<typeof emptyWeeklyBucket>>();
     for (const row of (uaRows ?? []) as {
@@ -1187,7 +1193,7 @@ export async function getCohortAnalyticsDetail(cohortId: string): Promise<{
 
     const { data: cohort } = await admin
       .from("cohorts")
-      .select("id, batch_name, module_name, company_id, created_at")
+      .select("id, batch_name, module_name, company_id, created_at, max_weeks")
       .eq("id", cohortId)
       .maybeSingle();
     if (!cohort) return { error: "Batch not found" };
@@ -1310,7 +1316,7 @@ export async function getCohortAnalyticsDetail(cohortId: string): Promise<{
     const cohortAnchors = await resolveCohortWeekAnchors(admin, [cohortId]);
     const cohortAnchor =
       cohortAnchors.get(cohortId) ?? weekAnchorFromTimestamp(cohort.created_at);
-    let maxWeek = weekNumberFor(new Date(), cohortAnchor);
+    let maxWeek = chartWeekCount(new Map([[cohortId, cohortAnchor]]), new Map([[cohortId, cohort.max_weeks]]));
     const weeklyBuckets = new Map<number, ReturnType<typeof emptyWeeklyBucket>>();
     for (const row of (uaRows ?? []) as {
       status: string;
