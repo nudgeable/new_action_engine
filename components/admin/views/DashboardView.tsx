@@ -278,7 +278,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 min-w-0">
           <h2 className="text-2xl lg:text-3xl font-bold" style={{ color: "var(--color-text-primary)" }}>
-            Dashboard
+            Admin Dashboard
           </h2>
           {batchSubtitle && (
             <p className="text-sm font-medium" style={{ color: "var(--color-text-muted)" }}>
