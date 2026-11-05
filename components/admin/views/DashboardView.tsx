@@ -40,6 +40,7 @@ const FROZEN_COLUMN_EDGE = "1px 0 0 var(--color-border-strong)";
 
 const axisTick = { fontSize: 11, fill: "var(--color-text-muted)" };
 const chartCursor = { fill: "rgba(102, 54, 232, 0.06)" };
+const barValueLabel = { fontSize: 10, fontWeight: 700, fill: "var(--color-text-primary)" };
 
 const cardStyle = { border: "1px solid var(--color-border)", boxShadow: "var(--shadow-sm)" };
 
@@ -360,13 +361,17 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                 emptyState("No scheduled actions in scope yet")
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <ReBarChart data={actionWeeklyChartData} barSize={14} barGap={2} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <ReBarChart data={actionWeeklyChartData} barSize={14} barGap={2} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke="var(--color-border)" />
                     <XAxis dataKey="name" interval="preserveStartEnd" tick={axisTick} tickLine={false} axisLine={{ stroke: "var(--color-border)" }} />
                     <YAxis allowDecimals={false} tickCount={4} tick={axisTick} tickLine={false} axisLine={false} width={36} />
                     <Tooltip contentStyle={tooltipStyle} cursor={chartCursor} labelFormatter={weekChartLabelFormatter(actionWeeklyChartData)} />
-                    <Bar dataKey="Actions due" fill={CHART_BASELINE} radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="Actions completed" fill={CHART_PRIMARY} radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="Actions due" fill={CHART_BASELINE} radius={[3, 3, 0, 0]}>
+                      <LabelList dataKey="Actions due" position="top" offset={4} style={barValueLabel} />
+                    </Bar>
+                    <Bar dataKey="Actions completed" fill={CHART_PRIMARY} radius={[3, 3, 0, 0]}>
+                      <LabelList dataKey="Actions completed" position="top" offset={4} style={barValueLabel} />
+                    </Bar>
                   </ReBarChart>
                 </ResponsiveContainer>
               )}
@@ -513,7 +518,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                 emptyState("No finalised plans yet")
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <ReBarChart data={weeklyTrendChartData} barCategoryGap="40%" margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <ReBarChart data={weeklyTrendChartData} barSize={14} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke="var(--color-border)" />
                     <XAxis dataKey="name" interval="preserveStartEnd" tick={axisTick} tickLine={false} axisLine={{ stroke: "var(--color-border)" }} />
                     <YAxis domain={[0, 100]} ticks={[0, 50, 100]} tick={axisTick} tickLine={false} axisLine={false} width={36} />
@@ -523,7 +528,15 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                       labelFormatter={weekChartLabelFormatter(weeklyTrendChartData)}
                       formatter={(value, name) => [`${value}%`, name]}
                     />
-                    <Bar dataKey="Avg. commitment %" fill={CHART_PRIMARY} radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="Avg. commitment %" fill={CHART_PRIMARY} radius={[3, 3, 0, 0]}>
+                      <LabelList
+                        dataKey="Avg. commitment %"
+                        position="top"
+                        offset={4}
+                        style={barValueLabel}
+                        formatter={(value) => `${value}%`}
+                      />
+                    </Bar>
                   </ReBarChart>
                 </ResponsiveContainer>
               )}
