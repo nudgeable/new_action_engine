@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type ComponentType, type ReactNode } from "react";
+import { useState, useEffect, useCallback, type ComponentType, type ReactNode } from "react";
 import {
   BarChart as ReBarChart,
   Bar,
@@ -15,6 +15,7 @@ import {
 import { ArrowDown, ArrowUp, Check, CircleCheck, Lightbulb, Mail, Target } from "lucide-react";
 import { useAdminContext } from "@/components/admin/AdminContext";
 import { useBatchOptions } from "@/components/admin/BatchSelector";
+import { ParticipantActionsModal } from "@/components/admin/ParticipantActionsModal";
 import { weekChartLabelFormatter, weekChartRange } from "@/components/admin/WeekChartTick";
 import {
   getActionCompletionWeeklyTrend,
@@ -37,6 +38,7 @@ const SCORE_BAND_COLORS = ["#D9D2FB", "#B49EF3", "#8460EC", CHART_PRIMARY];
 const TABLE_HEAD_BG = "#EDE9FE";
 // Right-hand edge of the frozen Rank / Name column, so scrolled cells read as passing under it.
 const FROZEN_COLUMN_EDGE = "1px 0 0 var(--color-border-strong)";
+const FROZEN_RIGHT_COLUMN_EDGE = "-1px 0 0 var(--color-border-strong)";
 
 const axisTick = { fontSize: 11, fill: "var(--color-text-muted)" };
 const chartCursor = { fill: "rgba(102, 54, 232, 0.06)" };
@@ -120,6 +122,8 @@ export function DashboardView({ companyId }: DashboardViewProps) {
   const [scoreBucketsLoading, setScoreBucketsLoading] = useState(true);
   const [leaderboard, setLeaderboard] = useState<DashboardLeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
+  const [viewingParticipant, setViewingParticipant] = useState<DashboardLeaderboardEntry | null>(null);
+  const closeParticipantModal = useCallback(() => setViewingParticipant(null), []);
   const [weeklyTrend, setWeeklyTrend] = useState<CommitmentWeeklyTrendEntry[]>([]);
   const [weeklyTrendDelta, setWeeklyTrendDelta] = useState<number | null>(null);
   const [weeklyTrendLoading, setWeeklyTrendLoading] = useState(true);
@@ -425,24 +429,30 @@ export function DashboardView({ companyId }: DashboardViewProps) {
             <div className="p-6 text-center text-sm font-medium" style={{ color: "var(--color-text-muted)" }}>No members in scope yet</div>
           ) : (
             <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-              <table className="w-full text-left border-collapse table-fixed min-w-[1080px] text-xs">
+              <table className="w-full text-left border-collapse table-fixed min-w-[1180px] text-xs">
                 <thead className="sticky top-0 z-10" style={{ background: TABLE_HEAD_BG }}>
                   <tr>
                     <th
                       className="sticky left-0 z-20 px-5 py-3 text-xs font-semibold"
-                      style={{ ...headCellStyle, width: "23%", background: TABLE_HEAD_BG, boxShadow: FROZEN_COLUMN_EDGE }}
+                      style={{ ...headCellStyle, width: "21%", background: TABLE_HEAD_BG, boxShadow: FROZEN_COLUMN_EDGE }}
                     >
                       Rank / Name
                     </th>
-                    <th className="px-2 py-3 text-xs font-semibold" style={{ ...headCellStyle, width: "12%" }}>Buddy</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Either mail opened</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Planned actions</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Actions sent</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Validated actions</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Current actions left</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Didn&apos;t complete</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Pending validation</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "9%" }}>Commitment score</th>
+                    <th className="px-2 py-3 text-xs font-semibold" style={{ ...headCellStyle, width: "10%" }}>Buddy</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "7.5%" }}>Either mail opened</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "7.5%" }}>Planned actions</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "7.5%" }}>Actions sent</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "7.5%" }}>Validated actions</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "7.5%" }}>Current actions left</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "7.5%" }}>Didn&apos;t complete</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "7.5%" }}>Pending validation</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8.5%" }}>Commitment score</th>
+                    <th
+                      className="sm:sticky sm:right-0 z-20 px-2 py-3 text-xs font-semibold text-center"
+                      style={{ ...headCellStyle, width: "8%", background: TABLE_HEAD_BG, boxShadow: FROZEN_RIGHT_COLUMN_EDGE }}
+                    >
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -487,6 +497,17 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                           {user.commitmentMaximum > 0 ? `${user.commitmentPct}%` : "No plan"}
                         </span>
                       </td>
+                      <td className="sm:sticky sm:right-0 z-[5] bg-white px-2 py-2.5 text-center" style={{ boxShadow: FROZEN_RIGHT_COLUMN_EDGE }}>
+                        <button
+                          type="button"
+                          onClick={() => setViewingParticipant(user)}
+                          aria-label={`View more about ${user.name}`}
+                          className="rounded-lg px-2.5 py-1 text-xs font-semibold whitespace-nowrap hover:bg-violet-50"
+                          style={{ color: CHART_PRIMARY, border: "1px solid #CFC5F7" }}
+                        >
+                          View more
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -494,6 +515,17 @@ export function DashboardView({ companyId }: DashboardViewProps) {
             </div>
           )}
         </DashboardCard>
+
+        {viewingParticipant && (
+          <ParticipantActionsModal
+            userId={viewingParticipant.id}
+            name={viewingParticipant.name}
+            email={viewingParticipant.email}
+            companyId={companyId}
+            cohortId={selectedCohortId}
+            onClose={closeParticipantModal}
+          />
+        )}
 
         {/* Batch Commitment Score (weekly trend + WoW delta, left) + Email Engagement (weekly table, right) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
