@@ -2,53 +2,60 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Loader2 } from "lucide-react";
 import InstallAppButton from "@/components/InstallAppButton";
 import { clearAdminBatchSelection } from "@/components/admin/AdminContext";
 
-const JOURNEY_STEPS = [
-  {
-    label: "Learn",
-    description: "Build the insight",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 5.5c3-1.1 5.7-.7 8 1.3v12c-2.3-2-5-2.4-8-1.3z" />
-        <path d="M20 5.5c-3-1.1-5.7-.7-8 1.3v12c2.3-2 5-2.4 8-1.3z" />
-      </svg>
-    ),
-  },
-  {
-    label: "Commit",
-    description: "Choose what you'll do",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M7 3h10v4H7z" />
-        <path d="M5 6h14v15H5z" />
-        <path d="m8 14 2.2 2.2L16.5 10" />
-      </svg>
-    ),
-  },
-  {
-    label: "Act",
-    description: "Apply it at work",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 12.5 10 17l9-10" />
-      </svg>
-    ),
-  },
-  {
-    label: "Repeat",
-    description: "Turn action into practice",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 7v5h-5" />
-        <path d="M4 17v-5h5" />
-        <path d="M6.1 8.3A7 7 0 0 1 18.8 9L20 12M4 12l1.2 3A7 7 0 0 0 17.9 15.7" />
-      </svg>
-    ),
-  },
-];
+/** A learning note becomes action cards, a phone message nudges, a tap completes. */
+function LoginStory() {
+  return (
+    <svg className="login-story" viewBox="0 0 560 265" role="img" aria-labelledby="login-story-title">
+      <title id="login-story-title">
+        A learning note becomes small action cards, a mobile message nudges you, and a tap marks the action complete.
+      </title>
+      <defs>
+        <pattern id="login-story-dots" width="15" height="15" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.25" fill="#ae9ec2" opacity=".42" />
+        </pattern>
+      </defs>
+      <rect x="4" y="27" width="550" height="219" rx="32" fill="url(#login-story-dots)" />
+      <path d="M137 143C200 143 205 96 259 96m120 39c39 0 51 18 65 40" fill="none" stroke="#8a779e" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="3 8" />
+
+      {/* One learning note becomes smaller actions. */}
+      <g transform="rotate(-12 72 128)">
+        <rect x="22" y="58" width="104" height="130" rx="14" fill="#dbccec" stroke="#28202d" strokeWidth="2" />
+        <rect x="16" y="51" width="104" height="130" rx="14" fill="#fff" stroke="#28202d" strokeWidth="2" />
+        <path d="M34 82h41m-41 18h66m-66 15h54m-54 15h61" stroke="#8c8092" strokeWidth="4" strokeLinecap="round" />
+        <path d="M34 82h23" stroke="#f5b822" strokeWidth="5" strokeLinecap="round" />
+      </g>
+      <g stroke="#28202d" strokeWidth="2">
+        <rect x="88" y="135" width="111" height="28" rx="8" fill="#fff4cf" />
+        <rect x="103" y="170" width="111" height="28" rx="8" fill="#eee5fb" />
+        <rect x="118" y="205" width="111" height="28" rx="8" fill="#fff" />
+      </g>
+      <path d="M101 149h6m8 0h58m-57 35h6m8 0h58m-57 35h6m8 0h58" stroke="#655771" strokeWidth="3" strokeLinecap="round" />
+
+      {/* A message arrives on a phone. */}
+      <rect x="268" y="25" width="120" height="208" rx="23" fill="#28202d" />
+      <rect x="261" y="19" width="120" height="208" rx="23" fill="#fff" stroke="#28202d" strokeWidth="2" />
+      <rect x="273" y="32" width="96" height="181" rx="14" fill="#ede4f7" />
+      <path d="M310 42h22m-21 161h20" stroke="#28202d" strokeWidth="3" strokeLinecap="round" />
+      <rect x="286" y="68" width="68" height="26" rx="8" fill="#fff" />
+      <path d="M298 81h37" stroke="#9d8eaa" strokeWidth="3" strokeLinecap="round" />
+      <rect x="294" y="106" width="128" height="56" rx="12" fill="#e4f5e9" stroke="#28202d" strokeWidth="2" />
+      <path d="M330 120h70m-70 13h56m-56 13h36" stroke="#53715c" strokeWidth="3" strokeLinecap="round" />
+      <path d="M319 125a8 8 0 0 1-11 7l-4 1 1-4a8 8 0 1 1 14-4Z" fill="#388351" />
+      <path d="M309 121c0 4 2 6 6 7" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+
+      {/* One tap confirms the action. */}
+      <circle cx="485" cy="181" r="41" fill="#28202d" />
+      <circle cx="480" cy="175" r="41" fill="#ffce00" stroke="#28202d" strokeWidth="2" />
+      <path d="m461 175 13 13 25-27" fill="none" stroke="#28202d" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M497 195 499 230 507 222 514 237 521 234 514 219 526 218Z" fill="#fff" stroke="#28202d" strokeWidth="2" strokeLinejoin="round" />
+      <path d="m521 144 8-8m4 18 11-3m-35-14 3-10" fill="none" stroke="#946613" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -82,46 +89,27 @@ export default function LoginPage() {
 
   return (
     <main className="login-page">
-      {/* ── Left: story panel ── */}
-      <section className="login-story" aria-labelledby="login-journey-title">
-        <div className="login-story-top">
-          <div className="login-eyebrow">Your development journey</div>
+      {/* ── Left: product story ── */}
+      <section className="login-product" aria-labelledby="login-product-title">
+        <div className="login-logo" role="img" aria-label="Apply">
+          apply
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 20 20 4M7 4h13v13" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </div>
-
-        <div className="login-story-copy">
-          <h1 id="login-journey-title">Turn learning into everyday action.</h1>
-          <p className="login-lede">Your commitments, actions and progress continue here.</p>
-
-          <div className="login-journey" aria-label="Learn, commit, act, repeat">
-            {JOURNEY_STEPS.map((step) => (
-              <div className="login-step" key={step.label}>
-                <div className="login-dot" aria-hidden="true">{step.icon}</div>
-                <div>
-                  <strong>{step.label}</strong>
-                  <span>{step.description}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <p className="login-kicker">AI-powered application platform</p>
+        <h1 id="login-product-title">Put your learning into practice.</h1>
+        <LoginStory />
       </section>
 
       {/* ── Right: sign-in panel ── */}
-      <section className="login-signin" aria-labelledby="login-signin-title">
-        <div className="login-form-wrap">
-          <div className="login-lock-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <rect x="5" y="10" width="14" height="11" rx="2" />
-              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-              <path d="M12 14v3" />
-            </svg>
-          </div>
+      <section className="login-panel" aria-labelledby="login-panel-title">
+        <div className="login-panel-inner">
+          <h2 id="login-panel-title">Welcome</h2>
+          <p className="login-hint">Sign in to your Apply account.</p>
 
-          <h2 id="login-signin-title">Welcome back</h2>
-          <p className="login-signin-copy">Sign in with your work credentials to continue your journey.</p>
-
-          <form onSubmit={handleSubmit}>
-            <div className="login-field">
+          <form className="login-form" onSubmit={handleSubmit}>
+            <div>
               <label htmlFor="email">Work email</label>
               <input
                 id="email"
@@ -138,7 +126,7 @@ export default function LoginPage() {
               />
             </div>
 
-            <div className="login-field">
+            <div>
               <label htmlFor="password">Password</label>
               <div className="login-password-field">
                 <input
@@ -157,33 +145,37 @@ export default function LoginPage() {
                   type="button"
                   className="login-reveal"
                   onClick={() => setShowPassword((v) => !v)}
+                  aria-controls="password"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   title={showPassword ? "Hide password" : "Show password"}
                   suppressHydrationWarning
                 >
-                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                  {showPassword ? <EyeOff size={18} strokeWidth={1.7} /> : <Eye size={18} strokeWidth={1.7} />}
                 </button>
               </div>
             </div>
 
-            <p className="login-support-line">Need help? Email <a href="mailto:team@nudgeable.ai">team@nudgeable.ai</a></p>
+            <p className="login-help">Need help? Email <a href="mailto:team@nudgeable.ai">team@nudgeable.ai</a></p>
 
-            {error && (
-              <div className="login-error" role="alert">
-                <span />
-                <p>{error}</p>
-              </div>
-            )}
+            {error && <p className="login-error" role="alert">{error}</p>}
 
-            <button type="submit" className="login-continue" disabled={loading} aria-busy={loading} suppressHydrationWarning>
-              {loading && <Loader2 size={18} className="animate-spin" aria-hidden="true" />}
-              {loading ? "Signing in…" : "Continue"}
+            <button type="submit" className="login-submit" disabled={loading} aria-busy={loading} suppressHydrationWarning>
+              {loading ? "Signing in…" : "Sign in"}
+              {loading
+                ? <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                : <ArrowRight size={18} strokeWidth={1.7} aria-hidden="true" />}
             </button>
           </form>
 
-          <p className="login-powered">Powered by <strong>Nudgeable</strong></p>
           <InstallAppButton />
         </div>
+
+        <p className="login-credit">
+          Powered by
+          <svg viewBox="106 98 704 149" role="img" aria-label="Nudgeable">
+            <image width="905" height="353" href="/NudgeableBlack.png" />
+          </svg>
+        </p>
       </section>
     </main>
   );
