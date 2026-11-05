@@ -8,7 +8,8 @@ type PageLoaderProps = {
   /**
    * Where the overlay sits:
    * - main: participant content area (keeps sidebar clear)
-   * - admin: admin content area (keeps admin sidebar clear)
+   * - admin: admin content area (keeps admin sidebar clear); always a plain
+   *   spinner card rather than a themed animation
    * - fullscreen: entire viewport (auth, etc.)
    */
   variant?: "main" | "admin" | "fullscreen";
@@ -116,7 +117,9 @@ function WalletBucketLoader() {
  * wrong place.
  */
 export default function PageLoader({ label, sublabel, variant = "fullscreen", theme = "default" }: PageLoaderProps) {
-  const resolvedLabel = label ?? (theme === "wallet" ? "Transferring to your Commitment Points" : undefined);
+  const isAdmin = variant === "admin";
+  const resolvedLabel =
+    label ?? (isAdmin ? "Loading…" : theme === "wallet" ? "Transferring to your Commitment Points" : undefined);
   return (
     <div
       className={`page-loader page-loader--${variant}`}
@@ -125,7 +128,9 @@ export default function PageLoader({ label, sublabel, variant = "fullscreen", th
       aria-busy="true"
     >
       <div className="page-loader__content">
-        {theme === "wallet" ? (
+        {isAdmin ? (
+          <span className="page-loader__spinner" aria-hidden="true" />
+        ) : theme === "wallet" ? (
           <WalletBucketLoader />
         ) : (
           <NudgieLoader src={NUDGIE_LOADER_SRC[theme]} />

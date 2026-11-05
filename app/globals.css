@@ -5021,9 +5021,62 @@ input[type="range"] {
   left: 252px;
 }
 
-/* Admin shell: cover content pane only (w-64 sidebar) */
+/* Admin shell: cover content pane only (w-64 sidebar). A light backdrop and a
+   plain spinner card to match the admin pages, instead of the participant
+   loader's dark sheet and Nudgie. */
 .page-loader--admin {
   left: 16rem;
+  background: rgba(238, 240, 245, 0.92);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.page-loader--admin .page-loader__content {
+  gap: 6px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 28px 24px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: var(--shadow-md);
+  text-align: center;
+}
+
+.page-loader__spinner {
+  width: 30px;
+  height: 30px;
+  margin-bottom: 10px;
+  border: 3px solid #E4DEFB;
+  border-top-color: #6636E8;
+  border-radius: 50%;
+  animation: page-loader-spin 0.8s linear infinite;
+}
+
+@keyframes page-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-loader__spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+.page-loader--admin .page-loader__label {
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.page-loader--admin .page-loader__sublabel {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .page-loader__content {
@@ -19050,8 +19103,9 @@ textarea.commitment-buddy-contact-selectable {
   gap: 0.5rem;
   padding: 0.4rem 0.6rem;
   border-radius: 12px;
-  background: rgba(255, 206, 0, 0.16);
-  border: 1px solid var(--color-border-yellow);
+  background: #fff;
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
 }
 .batch-picker--stacked { display: grid; gap: 0.75rem; padding: 0; background: none; border: 0; }
 .batch-picker-field { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }

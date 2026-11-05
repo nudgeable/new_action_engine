@@ -55,6 +55,11 @@ interface AdminContextType {
    * default `true`, so they're never blocked. */
   viewReady: boolean;
   setViewReady: (ready: boolean) => void;
+  /** Where a view wants the context bar placed. A view with its own header row
+   * registers an element here and AdminContextBar moves into it; views that
+   * don't leave it null and the bar keeps its own row above them. */
+  contextBarSlot: HTMLElement | null;
+  setContextBarSlot: (slot: HTMLElement | null) => void;
 }
 
 const AdminContext = createContext<AdminContextType | null>(null);
@@ -113,6 +118,7 @@ export function AdminContextProvider({
   const selectedCompanyId = companyControlled ? controlledCompanyId : uncontrolledCompanyId;
   const [selectedCohortId, setSelectedCohortIdState] = useState<string | null>(null);
   const [viewReady, setViewReady] = useState(true);
+  const [contextBarSlot, setContextBarSlot] = useState<HTMLElement | null>(null);
   const selectedCompanyIdRef = useRef<string | null>(null);
   const hydratedRef = useRef(false);
   selectedCompanyIdRef.current = selectedCompanyId;
@@ -198,6 +204,8 @@ export function AdminContextProvider({
         setSelectedCohortId,
         viewReady,
         setViewReady,
+        contextBarSlot,
+        setContextBarSlot,
       }}
     >
       {children}
@@ -235,13 +243,13 @@ export function CompanySelector() {
 }
 
 export function AdminContextBar() {
-  const { companies, role, effectiveCompanyId, selectedCohortId, setSelectedCohortId, companyControlled } =
+  const { companies, role, effectiveCompanyId, selectedCohortId, setSelectedCohortId, companyControlled, contextBarSlot } =
     useAdminContext();
 
   const showCompany = role === "superadmin" && companies.length > 0 && !companyControlled;
   if (!showCompany && !effectiveCompanyId) return null;
 
-  return (
+  const bar = (
     <div className="flex flex-wrap items-center justify-end gap-3">
       <CompanySelector />
       {effectiveCompanyId && (
@@ -253,6 +261,8 @@ export function AdminContextBar() {
       )}
     </div>
   );
+
+  return contextBarSlot ? createPortal(bar, contextBarSlot) : bar;
 }
 
 /**

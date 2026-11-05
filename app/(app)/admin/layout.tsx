@@ -32,7 +32,7 @@ export default async function AdminLayout({
     .order("name");
 
   return (
-    <div className="h-screen flex overflow-hidden" style={{ background: "var(--color-bg-base)" }}>
+    <div className="h-screen flex overflow-hidden" style={{ background: "#EEF0F5" }}>
       <AdminSidebar displayName={displayName} />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto relative">
