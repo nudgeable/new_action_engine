@@ -156,7 +156,7 @@ const Onboarding: React.FC<{
           <label className="plan-whatsapp-check">
             <input type="checkbox" checked={whatsappEnabled} onChange={(event) => { setWhatsappEnabled(event.target.checked); setErrorMsg(null); }} />
             <MessageCircle size={18} />
-            <span><strong>Send my reminders on WhatsApp</strong><small>As well as email. Reply STOP on WhatsApp anytime to turn them off.</small></span>
+            <span><strong>Send my reminders on WhatsApp</strong><small>As well as email, plus a Friday recap. Reply STOP on WhatsApp anytime to turn them off.</small></span>
           </label>
           {whatsappEnabled && <label className="plan-setup-field plan-whatsapp-number"><span>WhatsApp number</span><input type="tel" inputMode="tel" autoComplete="tel" placeholder="+91 98000 00000" value={whatsappNumber} onChange={(event) => setWhatsappNumber(event.target.value)} /></label>}
         </div>}

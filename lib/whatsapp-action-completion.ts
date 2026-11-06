@@ -16,7 +16,8 @@
  * window, so they need no template.
  *
  * Settlement runs in complete_action_for_user
- * (supabase/migrations/085_complete_action_for_user.sql), which calls the
+ * (supabase/migrations/085_complete_action_for_user.sql; 087 redefines it to
+ * mark user_actions.completed_via = 'whatsapp'), which calls the
  * same RPCs as completeAction() in app/actions/user-actions.ts. The profile
  * points and feed event below mirror the rest of completeAction — keep the
  * two in sync.
@@ -66,6 +67,30 @@ export function parseDonePayload(payload: string | null | undefined): DoneTap | 
   if (!Number.isInteger(number) || number < 1 || number > compactIds.length) return null;
   const reminderActionIds = compactIds.map(expandId);
   return { number, actionId: reminderActionIds[number - 1], reminderActionIds };
+}
+
+const RECAP_ALL_PREFIX = "all:";
+const RECAP_SOME_PREFIX = "some:";
+
+/** Payload of the Friday recap's "All done" button. */
+export function recapAllPayload(actionIds: string[]): string {
+  return `${RECAP_ALL_PREFIX}${actionIds.slice(0, MAX_REMINDER_ACTIONS).map(compactId).join(",")}`;
+}
+
+/** Payload of the Friday recap's "Some done" button. */
+export function recapSomePayload(actionIds: string[]): string {
+  return `${RECAP_SOME_PREFIX}${actionIds.slice(0, MAX_REMINDER_ACTIONS).map(compactId).join(",")}`;
+}
+
+export type RecapTap = { kind: "all" | "some"; actionIds: string[] };
+
+/** Decodes a recap "All done" / "Some done" payload, or null for anything else. */
+export function parseRecapPayload(payload: string | null | undefined): RecapTap | null {
+  const kind = payload?.startsWith(RECAP_ALL_PREFIX) ? "all" : payload?.startsWith(RECAP_SOME_PREFIX) ? "some" : null;
+  if (!kind || !payload) return null;
+  const compactIds = payload.slice((kind === "all" ? RECAP_ALL_PREFIX : RECAP_SOME_PREFIX).length).split(",");
+  if (compactIds.length > MAX_REMINDER_ACTIONS || !compactIds.every((id) => COMPACT_ID.test(id))) return null;
+  return { kind, actionIds: compactIds.map(expandId) };
 }
 
 export type WhatsAppCompletion =
@@ -230,20 +255,67 @@ export function buildCompletionFollowUp(params: {
       ? "✅ When you complete it, click the button below to update its status as done."
       : "✅ When you complete an action, click its button below to update its status as done."
   );
-  const body = truncate(lines.join("\n"), MAX_BODY);
-  const allIds = actions.map((action) => action.id);
+  return doneButtonsMessage(lines, actions);
+}
 
+/** `lines` as the body, with an "Action N done" reply button per open action. */
+function doneButtonsMessage(lines: string[], actions: ReminderActionState[]): FollowUpMessage {
+  const allIds = actions.map((action) => action.id);
   return {
     kind: "interactive",
     interactive: {
       type: "button",
-      body: { text: body },
+      body: { text: truncate(lines.join("\n"), MAX_BODY) },
       action: {
-        buttons: open.map((action) => ({
-          type: "reply",
-          reply: { id: doneButtonPayload(allIds, action.number), title: `Action ${action.number} done` },
-        })),
+        buttons: actions
+          .filter((action) => !action.done)
+          .map((action) => ({
+            type: "reply",
+            reply: { id: doneButtonPayload(allIds, action.number), title: `Action ${action.number} done` },
+          })),
       },
     },
   };
+}
+
+/**
+ * The reply to the Friday recap's "All done" tap. Every action was tried, so
+ * this only reports: saved, already saved, or couldn't be done from WhatsApp.
+ */
+export function buildRecapAllDoneFollowUp(completions: WhatsAppCompletion[]): FollowUpMessage {
+  const saved = completions.filter((completion) => completion.outcome === "completed");
+  const blocked = completions.filter(
+    (completion) => completion.outcome === "not_assigned" || completion.outcome === "unsupported"
+  ).length;
+  const total = completions.length;
+  const noun = `action${total === 1 ? "" : "s"}`;
+
+  if (blocked) {
+    const lines = saved.length ? [`✅ Saved! ${saved.length} of your ${total} ${noun} marked done.`, ""] : [];
+    lines.push(
+      `We couldn't update ${blocked === 1 ? "1 action" : `${blocked} actions`} from WhatsApp. Please open Nudgeable and mark ${blocked === 1 ? "it" : "them"} done there.`
+    );
+    return { kind: "text", body: lines.join("\n") };
+  }
+
+  const lines = saved.length
+    ? [total === 1 ? "✅ Saved! Your action is marked done." : `✅ Saved! All ${total} actions are marked done.`]
+    : [total === 1 ? "👍 Your action was already marked done." : `👍 All ${total} actions were already marked done.`];
+  if (saved.some((completion) => completion.completedLate)) {
+    lines.push("Anything past its assigned day is recorded as completed late.");
+  }
+  lines.push("", "🎉 Well done, you've completed all your actions! Have a good weekend.");
+  return { kind: "text", body: lines.join("\n") };
+}
+
+/**
+ * The reply to the Friday recap's "Some done" tap: the actions still open with
+ * a Done button each. Those taps then run the normal Done flow above.
+ */
+export function buildRecapSomeDoneFollowUp(actions: ReminderActionState[]): FollowUpMessage {
+  const open = actions.filter((action) => !action.done);
+  if (!open.length) return { kind: "text", body: "👍 All your actions are already marked done. Have a good weekend." };
+  const lines = [open.length === 1 ? "Have you completed this one?" : "Which ones have you completed?"];
+  for (const action of open) lines.push("", `${numberEmoji(action.number)} ${action.title}`);
+  return doneButtonsMessage(lines, actions);
 }

@@ -5,9 +5,11 @@ import { sendTemplateToUsers } from "@/lib/email-send";
 import { type ScheduleType } from "@/app/actions/email-schedule";
 import { computeNextRunAtAfter } from "@/lib/schedule-utils";
 import { buildWeeklyEmailTemplateDataForUser } from "@/lib/weekly-email";
-import { getDueSubscriptions, assignScheduledBatch } from "@/lib/personal-action-generation";
+import { getDueSubscriptions, assignScheduledBatch, getWeekdayIST } from "@/lib/personal-action-generation";
 import { sendDailyActionReminders } from "@/lib/action-reminders";
-import { sendWhatsAppActionReminders } from "@/lib/whatsapp-reminders";
+import { sendWhatsAppActionReminders, sendWhatsAppWeeklyRecap } from "@/lib/whatsapp-reminders";
+import { RECAP_WEEKDAY } from "@/lib/reminder-days";
+import { getCurrentISTDate } from "@/lib/timezone-utils";
 
 /**
  * Shared cron handler — runs once daily at 11:30 AM IST / 06:00 UTC
@@ -74,6 +76,10 @@ export async function GET(request: Request) {
   // as the reminder email, and before the Resend check so WhatsApp doesn't
   // depend on email being configured.
   const whatsappReminders = await sendWhatsAppActionReminders();
+  // Saturday catch-up for Friday recaps that failed or never ran; plans already
+  // sent are skipped by their claim. The Friday run has its own cron path.
+  const whatsappRecapCatchUp =
+    getWeekdayIST(getCurrentISTDate()) === RECAP_WEEKDAY + 1 ? await sendWhatsAppWeeklyRecap() : null;
 
   // ── Email schedules (require Resend) ────────────────────────────────────────
   if (!isResendConfigured()) {
@@ -84,6 +90,7 @@ export async function GET(request: Request) {
       results: [],
       subscriptionsDelivered,
       whatsappReminders,
+      whatsappRecapCatchUp,
       reminders: {
         sent: 0,
         failed: 0,
@@ -219,5 +226,6 @@ export async function GET(request: Request) {
     subscriptionsDelivered,
     reminders: reminderSummary,
     whatsappReminders,
+    whatsappRecapCatchUp,
   });
 }

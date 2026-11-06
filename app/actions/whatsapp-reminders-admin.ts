@@ -4,13 +4,16 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentISTDate, istToUTCDateTime } from "@/lib/timezone-utils";
 import { getWeekdayIST } from "@/lib/personal-action-generation";
-import { reminderDaysFor } from "@/lib/reminder-days";
+import { RECAP_WEEKDAY, reminderDaysFor } from "@/lib/reminder-days";
 import { formatWhatsAppNumber } from "@/lib/whatsapp-contacts";
-import { actionReminderTemplateName } from "@/lib/whatsapp-templates";
+import { actionReminderTemplateName, weeklyRecapTemplateName } from "@/lib/whatsapp-templates";
 import { isWhatsAppSendConfigured } from "@/lib/whatsapp";
+import { FIXED_WEEKLY_RECAP_TIME_IST } from "@/lib/action-reminders";
 import {
   WHATSAPP_REMINDER_SUBSCRIPTION_COLUMNS,
+  isWhatsAppRecapEnabled,
   prepareWhatsAppReminders,
+  sendPreparedWhatsAppRecap,
   sendPreparedWhatsAppReminder,
   type WhatsAppReminderSubscription,
 } from "@/lib/whatsapp-reminders";
@@ -18,8 +21,11 @@ import {
 /**
  * Superadmin → Emails & reminders → WhatsApp tab. Mirrors the email reminder
  * queue (app/actions/action-reminders.ts): the upcoming WhatsApp reminders,
- * a manual "send now", and delivery history from the webhook's statuses.
+ * a manual "send now", and delivery history from the webhook's statuses. The
+ * same views cover the Friday recap (kind "recap").
  */
+
+export type WhatsAppMessageKind = "reminder" | "recap";
 
 const SUPERADMIN_EMAIL = (process.env.SUPERADMIN_EMAIL || "admin@actionengine").toLowerCase();
 const REMINDER_TIME_IST = "11:30";
@@ -80,18 +86,23 @@ export type UpcomingWhatsAppReminder = {
 
 export type WhatsAppReminderOverview = {
   configured: boolean;
+  /** Whether the automatic Friday recap is on (it then replaces the Friday reminder). */
+  recapEnabled: boolean;
   /** Active plans in a batch, and how many of them have WhatsApp on. */
   activePlans: number;
   whatsappOn: number;
   reminders: UpcomingWhatsAppReminder[];
 };
 
-/** Plans with WhatsApp reminders on, ordered by their next 11:30 IST send. */
-export async function getUpcomingWhatsAppReminders(): Promise<{ data: WhatsAppReminderOverview } | { error: string }> {
+/** Plans with WhatsApp reminders on, ordered by their next automatic send. */
+export async function getUpcomingWhatsAppReminders(
+  kind: WhatsAppMessageKind = "reminder"
+): Promise<{ data: WhatsAppReminderOverview } | { error: string }> {
   try {
     await ensureSuperadmin();
     const admin = createAdminClient();
     const todayIST = getCurrentISTDate();
+    const recapEnabled = isWhatsAppRecapEnabled();
 
     const [{ count: activePlans }, { data: rows, error }, { data: sentToday }] = await Promise.all([
       admin
@@ -107,7 +118,9 @@ export async function getUpcomingWhatsAppReminders(): Promise<{ data: WhatsAppRe
         .eq("whatsapp_reminders_enabled", true)
         .is("archived_at", null)
         .not("cohort_id", "is", null),
-      admin.from("whatsapp_reminder_claims").select("subscription_id").eq("reminder_date", todayIST).eq("status", "sent"),
+      kind === "recap"
+        ? admin.from("whatsapp_recap_claims").select("subscription_id").eq("recap_date", todayIST).eq("status", "sent")
+        : admin.from("whatsapp_reminder_claims").select("subscription_id").eq("reminder_date", todayIST).eq("status", "sent"),
     ]);
     if (error) return { error: error.message };
 
@@ -120,13 +133,17 @@ export async function getUpcomingWhatsAppReminders(): Promise<{ data: WhatsAppRe
 
     const reminders = prepared
       .map((item): UpcomingWhatsAppReminder => {
-        const days = reminderDaysFor(item.sub);
+        // With the recap on, Friday belongs to the recap, not the reminder.
+        const days =
+          kind === "recap"
+            ? [RECAP_WEEKDAY]
+            : reminderDaysFor(item.sub).filter((day) => !recapEnabled || day !== RECAP_WEEKDAY);
         let scheduledFor: string | null = null;
         for (let offset = 0; offset <= 7; offset += 1) {
           const date = addDays(todayIST, offset);
           if (!days.includes(getWeekdayIST(date))) continue;
           if (offset === 0 && sentTodayIds.has(item.sub.id)) continue;
-          scheduledFor = istToUTCDateTime(date, REMINDER_TIME_IST);
+          scheduledFor = istToUTCDateTime(date, kind === "recap" ? FIXED_WEEKLY_RECAP_TIME_IST : REMINDER_TIME_IST);
           break;
         }
         return {
@@ -137,10 +154,10 @@ export async function getUpcomingWhatsAppReminders(): Promise<{ data: WhatsAppRe
           cohortId: item.sub.cohort_id,
           cohortName: item.cohortName ?? "Unknown batch",
           track: item.sub.track,
-          scheduleLabel: scheduleLabel(item.sub),
+          scheduleLabel: kind === "recap" ? "Fridays at 12:30 PM IST" : scheduleLabel(item.sub),
           scheduledFor,
           phone: item.phone ? formatWhatsAppNumber(item.phone) : null,
-          templateName: actionReminderTemplateName(item.actions.length),
+          templateName: (kind === "recap" ? weeklyRecapTemplateName : actionReminderTemplateName)(item.actions.length),
           actions: item.actions.map((action) => ({ id: action.id, title: action.title })),
           actionCount: item.actions.length,
           canSend: item.blockedReason === null,
@@ -157,6 +174,7 @@ export async function getUpcomingWhatsAppReminders(): Promise<{ data: WhatsAppRe
     return {
       data: {
         configured: isWhatsAppSendConfigured(),
+        recapEnabled,
         activePlans: activePlans ?? 0,
         whatsappOn: subs.length,
         reminders,
@@ -176,12 +194,13 @@ export type ManualWhatsAppReminderResult = {
 };
 
 /**
- * Sends the selected participants' WhatsApp reminder right now. Like the
- * email queue's manual send, it can be repeated and does not use up the
- * automatic 11:30 reminder (no daily claim is taken).
+ * Sends the selected participants' WhatsApp reminder or recap right now. Like
+ * the email queue's manual send, it can be repeated and does not use up the
+ * automatic send (no claim is taken).
  */
 export async function sendWhatsAppRemindersNow(
-  subscriptionIds: string[]
+  subscriptionIds: string[],
+  kind: WhatsAppMessageKind = "reminder"
 ): Promise<{ sent: number; failed: number; skipped: number; data: ManualWhatsAppReminderResult[] } | { error: string }> {
   try {
     await ensureSuperadmin();
@@ -208,7 +227,10 @@ export async function sendWhatsAppRemindersNow(
         data.push({ subscriptionId: item.sub.id, fullName: item.fullName, status: "skipped", error: item.blockedReason });
         continue;
       }
-      const { result, templateName } = await sendPreparedWhatsAppReminder(item, "action_reminder_manual");
+      const { result, templateName } =
+        kind === "recap"
+          ? await sendPreparedWhatsAppRecap(item, "weekly_recap_manual")
+          : await sendPreparedWhatsAppReminder(item, "action_reminder_manual");
       data.push({
         subscriptionId: item.sub.id,
         fullName: item.fullName,
@@ -251,7 +273,7 @@ export async function getWhatsAppReminderLogs(): Promise<{ data: WhatsAppReminde
     const { data: rows, error } = await admin
       .from("whatsapp_message_logs")
       .select("wamid, user_id, to_phone, template_name, purpose, status, created_at, delivered_at, read_at, error_title, error_code")
-      .in("purpose", ["action_reminder", "action_reminder_manual"])
+      .in("purpose", ["action_reminder", "action_reminder_manual", "weekly_recap", "weekly_recap_manual"])
       .order("created_at", { ascending: false })
       .limit(500);
     if (error) return { error: error.message };
@@ -268,7 +290,7 @@ export async function getWhatsAppReminderLogs(): Promise<{ data: WhatsAppReminde
         fullName: row.user_id ? names.get(row.user_id as string) ?? null : null,
         phone: row.to_phone ? formatWhatsAppNumber(row.to_phone as string) : null,
         templateName: (row.template_name as string | null) ?? null,
-        kind: row.purpose === "action_reminder_manual" ? "manual" : "automatic",
+        kind: String(row.purpose).endsWith("_manual") ? "manual" : "automatic",
         status: row.status as WhatsAppReminderLog["status"],
         createdAt: row.created_at as string,
         deliveredAt: (row.delivered_at as string | null) ?? null,

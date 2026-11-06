@@ -502,7 +502,8 @@ export type WeeklyRecapRunSummary = {
   skippedClaimed: number;
 };
 
-export const FIXED_WEEKLY_RECAP_TIME_IST = "16:00";
+/** Must match the weekly-recap cron in vercel.json (07:00 UTC). */
+export const FIXED_WEEKLY_RECAP_TIME_IST = "12:30";
 
 /**
  * Sends every active participant (daily or weekly track) a Friday recap of

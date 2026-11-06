@@ -125,8 +125,7 @@ line in the template itself: one UTILITY template per action count, chosen by
     be repeated, doesn't use up the automatic reminder (no daily claim).
   - Delivery history: every reminder (automatic or sent now) with the
     webhook's sent / delivered / read / failed status and Meta error.
-- Later: Friday recap on WhatsApp; bulk CSV import of numbers; optional
-  per-cohort rollout flag; "Done" quick-reply button completing the action.
+- Later: bulk CSV import of numbers; optional per-cohort rollout flag.
 
 ### Option A — "Done" buttons complete actions from WhatsApp (this branch)
 - A participant has at most three current actions (weekly plans are capped at
@@ -168,3 +167,40 @@ line in the template itself: one UTILITY template per action count, chosen by
 - If a reminder ever had more than three actions, line 3 reads "(+N more)" and
   only the first three get buttons.
 - `action_reminder_1…5` (approved, no buttons) are kept but no longer used.
+
+### Friday recap on WhatsApp
+- Same people and actions as the reminder: active, unarchived plans in a batch
+  with WhatsApp on, a number and no STOP, listing the plan's current actions
+  (at most three; Pending validation actions are not listed, as in the email).
+  Nothing is sent to a plan with no open actions.
+- Sent at 12:30 IST on Fridays by the weekly-recap cron, alongside the recap
+  email and before its Resend check. `sendWhatsAppWeeklyRecap()` in
+  `lib/whatsapp-reminders.ts`.
+- **The recap replaces the Friday WhatsApp reminder** (11:30), so nobody gets
+  the same list twice an hour apart. The reminder email is unchanged.
+- **Rollout switch:** `WHATSAPP_WEEKLY_RECAP_ENABLED=true` turns on both the
+  automatic recap and the Friday reminder skip. Leave it unset until all three
+  templates are approved, or Friday's WhatsApp would fail with nothing sent.
+  Send now in superadmin works regardless, for testing after approval.
+- Templates (UTILITY, en, no header, footer "Reply STOP to turn off WhatsApp
+  reminders"): `plan_recap_1` (1160616259725238), `plan_recap_2`
+  (1876617937038332), `plan_recap_3` (2353028508434770). Wording is in
+  `lib/whatsapp-templates.ts`. Submitted 2026-11-04. Scores and progress stay
+  out of them to keep them UTILITY. If Meta approves them as MARKETING, don't
+  turn the recap on.
+- Buttons: `plan_recap_1` has "Action done" (a normal `done:` payload).
+  `plan_recap_2…3` have "All done" (`all:<ids>`) and "Some done" (`some:<ids>`),
+  two buttons because four would collapse behind "See all options".
+  - All done completes each action in turn, with no confirm step and no undo.
+    If one fails, Meta's retry repeats the tap and the finished ones return
+    already_done.
+  - Some done replies with the open actions and a Done button each, which then
+    run the normal Done flow.
+- `supabase/migrations/088_whatsapp_recap_claims.sql`: own claims, one per plan
+  per Friday. `whatsapp_reminder_claims` can't be reused: it's unique per plan
+  per day, so the two would collide.
+- Saturday catch-up: the daily cron runs the recap again on Saturday, claiming
+  against the same Friday, so failed or missed sends go out once. It also
+  reaches anyone with open actions who turned WhatsApp on after Friday's run.
+- Superadmin → WhatsApp reminders has a **Friday recap** switch: upcoming, Send
+  now (`weekly_recap_manual`) and delivery history share the reminder views.

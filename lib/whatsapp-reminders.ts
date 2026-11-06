@@ -17,21 +17,31 @@
  * prepareWhatsAppReminders / sendPreparedWhatsAppReminder are shared with the
  * superadmin WhatsApp tab (app/actions/whatsapp-reminders-admin.ts), so a
  * manual send is exactly what the cron would send.
+ *
+ * The Friday recap (sendWhatsAppWeeklyRecap) goes to the same people with the
+ * same current actions, and on Fridays it replaces the reminder, so nobody
+ * gets the same list twice. Both changes are off until
+ * WHATSAPP_WEEKLY_RECAP_ENABLED is "true", which keeps the normal Friday
+ * reminder running until Meta has approved the plan_recap_N templates.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentISTDate, istToUTCDateTime } from "@/lib/timezone-utils";
 import { getWeekdayIST } from "@/lib/personal-action-generation";
-import { reminderDaysFor } from "@/lib/reminder-days";
+import { RECAP_WEEKDAY, reminderDaysFor, whatsappRecapDate } from "@/lib/reminder-days";
 import {
   buildReminderActionContext,
   subscriptionKey,
   type ReminderAction,
   type ReminderSubscription,
 } from "@/lib/action-reminders";
-import { buildActionReminder } from "@/lib/whatsapp-templates";
+import { buildActionReminder, buildWeeklyRecap } from "@/lib/whatsapp-templates";
 import { isWhatsAppSendConfigured, sendWhatsAppTemplate, type WhatsAppSendResult } from "@/lib/whatsapp";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
+
+export function isWhatsAppRecapEnabled(): boolean {
+  return process.env.WHATSAPP_WEEKLY_RECAP_ENABLED === "true";
+}
 
 export type WhatsAppReminderSubscription = ReminderSubscription & { whatsapp_reminders_enabled: boolean };
 
@@ -128,10 +138,32 @@ export async function sendPreparedWhatsAppReminder(
   return { result, templateName: template.name };
 }
 
+/** Sends one prepared Friday recap (caller checks blockedReason first). */
+export async function sendPreparedWhatsAppRecap(
+  prepared: PreparedWhatsAppReminder,
+  purpose: "weekly_recap" | "weekly_recap_manual"
+): Promise<{ result: WhatsAppSendResult; templateName: string }> {
+  const { template, components } = buildWeeklyRecap({
+    firstName: prepared.fullName?.trim().split(/\s+/)[0] ?? null,
+    companyName: prepared.companyName,
+    actions: prepared.actions.map((action) => ({ id: action.id, title: action.title })),
+  });
+  const result = await sendWhatsAppTemplate({
+    to: prepared.phone ?? "",
+    template,
+    components,
+    userId: prepared.sub.user_id,
+    purpose,
+  });
+  return { result, templateName: template.name };
+}
+
 export type WhatsAppReminderRunSummary = {
   configured: boolean;
   sent: number;
   failed: number;
+  /** Fridays with the recap on: the recap goes out instead. */
+  replacedByRecap: boolean;
   skippedNotDue: number;
   skippedNoNumber: number;
   skippedOptedOut: number;
@@ -144,6 +176,7 @@ export async function sendWhatsAppActionReminders(): Promise<WhatsAppReminderRun
     configured: isWhatsAppSendConfigured(),
     sent: 0,
     failed: 0,
+    replacedByRecap: false,
     skippedNotDue: 0,
     skippedNoNumber: 0,
     skippedOptedOut: 0,
@@ -155,6 +188,7 @@ export async function sendWhatsAppActionReminders(): Promise<WhatsAppReminderRun
   const admin = createAdminClient();
   const todayIST = getCurrentISTDate();
   const todayWeekday = getWeekdayIST(todayIST);
+  if (todayWeekday === RECAP_WEEKDAY && isWhatsAppRecapEnabled()) return { ...summary, replacedByRecap: true };
 
   const { data: subscriptionRows, error: subscriptionError } = await admin
     .from("personal_action_subscriptions")
@@ -234,6 +268,116 @@ export async function sendWhatsAppActionReminders(): Promise<WhatsAppReminderRun
     } else {
       summary.failed += 1;
       console.error("[whatsapp-reminders] send failed", { subscriptionId: sub.id, error: result.error });
+    }
+  }
+
+  return summary;
+}
+
+export type WhatsAppRecapRunSummary = {
+  configured: boolean;
+  enabled: boolean;
+  sent: number;
+  failed: number;
+  skippedNoNumber: number;
+  skippedOptedOut: number;
+  skippedEmpty: number;
+  skippedClaimed: number;
+};
+
+/**
+ * Sends the Friday recap to every active plan with WhatsApp on. Runs from the
+ * weekly-recap cron on Friday and from the daily cron on Saturday, as a
+ * catch-up for failed or missed sends; on other days it does nothing. Claims
+ * are per plan per Friday, so a plan already sent is skipped.
+ */
+export async function sendWhatsAppWeeklyRecap(): Promise<WhatsAppRecapRunSummary> {
+  const summary: WhatsAppRecapRunSummary = {
+    configured: isWhatsAppSendConfigured(),
+    enabled: isWhatsAppRecapEnabled(),
+    sent: 0,
+    failed: 0,
+    skippedNoNumber: 0,
+    skippedOptedOut: 0,
+    skippedEmpty: 0,
+    skippedClaimed: 0,
+  };
+  const recapDate = whatsappRecapDate(getCurrentISTDate());
+  if (!summary.configured || !summary.enabled || !recapDate) return summary;
+
+  const admin = createAdminClient();
+  const { data: subscriptionRows, error: subscriptionError } = await admin
+    .from("personal_action_subscriptions")
+    .select(WHATSAPP_REMINDER_SUBSCRIPTION_COLUMNS)
+    .eq("is_active", true)
+    .eq("whatsapp_reminders_enabled", true)
+    .is("archived_at", null)
+    .not("cohort_id", "is", null);
+  if (subscriptionError) {
+    console.error("[whatsapp-recap] failed to load subscriptions", subscriptionError.message);
+    return { ...summary, failed: 1 };
+  }
+
+  const subs = (subscriptionRows ?? []) as WhatsAppReminderSubscription[];
+  let prepared: PreparedWhatsAppReminder[];
+  try {
+    prepared = await prepareWhatsAppReminders(admin, subs);
+  } catch (error) {
+    console.error("[whatsapp-recap] failed to prepare recaps", error);
+    return { ...summary, failed: subs.length };
+  }
+
+  for (const recap of prepared) {
+    if (!recap.phone) {
+      summary.skippedNoNumber += 1;
+      continue;
+    }
+    if (recap.optedOut) {
+      summary.skippedOptedOut += 1;
+      continue;
+    }
+    if (recap.blockedReason) {
+      summary.skippedEmpty += 1;
+      continue;
+    }
+
+    const { sub } = recap;
+    const { data: claimId, error: claimError } = await admin.rpc("claim_whatsapp_recap", {
+      p_subscription_id: sub.id,
+      p_user_id: sub.user_id,
+      p_cohort_id: sub.cohort_id,
+      p_recap_date: recapDate,
+    });
+    if (claimError) {
+      console.error("[whatsapp-recap] failed to claim recap", { subscriptionId: sub.id, error: claimError.message });
+      summary.failed += 1;
+      continue;
+    }
+    if (!claimId) {
+      summary.skippedClaimed += 1;
+      continue;
+    }
+
+    const { result, templateName } = await sendPreparedWhatsAppRecap(recap, "weekly_recap");
+    const now = new Date().toISOString();
+    await admin
+      .from("whatsapp_recap_claims")
+      .update({
+        status: result.ok ? "sent" : "failed",
+        wamid: result.ok ? result.wamid : null,
+        template_name: templateName,
+        action_count: recap.actions.length,
+        last_error: result.ok ? null : result.error,
+        sent_at: result.ok ? now : null,
+        updated_at: now,
+      })
+      .eq("id", String(claimId));
+
+    if (result.ok) {
+      summary.sent += 1;
+    } else {
+      summary.failed += 1;
+      console.error("[whatsapp-recap] send failed", { subscriptionId: sub.id, error: result.error });
     }
   }
 

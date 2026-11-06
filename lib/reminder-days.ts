@@ -28,6 +28,21 @@ function weekdayOf(date: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
+/** The Friday recap day. */
+export const RECAP_WEEKDAY = 5;
+
+/**
+ * The Friday a WhatsApp recap run on `todayIST` belongs to, or null. Friday is
+ * the normal run; Saturday is the catch-up for a Friday that failed or didn't
+ * run, and claims against the same Friday so nobody gets two.
+ */
+export function whatsappRecapDate(todayIST: string): string | null {
+  const weekday = weekdayOf(todayIST);
+  if (weekday === RECAP_WEEKDAY) return todayIST;
+  if (weekday === RECAP_WEEKDAY + 1) return shiftDate(todayIST, -1);
+  return null;
+}
+
 /**
  * The reminder occurrence (IST date) that should go out on `todayIST`, or null.
  *

@@ -3,6 +3,8 @@
  * app/api/webhooks/whatsapp/route.ts for each newly received message):
  *   - a "Done" tap (on a reminder or a follow-up) → completes that action
  *     (lib/whatsapp-action-completion.ts) and replies with what's still open
+ *   - "All done" on the Friday recap → completes every action in that recap;
+ *     "Some done" → replies with the open actions and a Done button for each
  *   - STOP / UNSUBSCRIBE → opts the sender out of WhatsApp reminders on
  *     every plan (whatsapp_contacts.opted_out_at)
  *   - START → opts back in, and turns WhatsApp on for their unarchived plans
@@ -16,10 +18,16 @@ import type { createAdminClient } from "@/lib/supabase/admin";
 import { parseOptKeyword } from "@/lib/whatsapp-contacts";
 import {
   buildCompletionFollowUp,
+  buildRecapAllDoneFollowUp,
+  buildRecapSomeDoneFollowUp,
   completeActionFromWhatsApp,
   loadReminderActionStates,
   parseDonePayload,
+  parseRecapPayload,
   type DoneTap,
+  type FollowUpMessage,
+  type RecapTap,
+  type WhatsAppCompletion,
 } from "@/lib/whatsapp-action-completion";
 import { isWhatsAppSendConfigured, sendWhatsAppInteractive, sendWhatsAppText } from "@/lib/whatsapp";
 import type { WhatsAppInboundMessage } from "@/lib/whatsapp-webhook";
@@ -37,6 +45,12 @@ export async function handleInboundMessage(admin: AdminClient, message: WhatsApp
   const doneTap = parseDonePayload(message.replyPayload);
   if (doneTap) {
     await handleDoneTap(admin, message, doneTap);
+    return;
+  }
+
+  const recapTap = parseRecapPayload(message.replyPayload);
+  if (recapTap) {
+    await handleRecapTap(admin, message, recapTap);
     return;
   }
 
@@ -97,6 +111,49 @@ export async function handleInboundMessage(admin: AdminClient, message: WhatsApp
  * function refuses actions that aren't on their plan.
  */
 async function handleDoneTap(admin: AdminClient, message: WhatsAppInboundMessage, tap: DoneTap) {
+  const userId = await tapUserId(admin, message);
+  if (!userId) return;
+
+  const completion = await completeActionFromWhatsApp(admin, userId, tap.actionId);
+  // Best effort from here: the action is saved, so a failed follow-up must
+  // not make Meta retry the tap.
+  try {
+    const actions = await loadReminderActionStates(admin, userId, tap.reminderActionIds);
+    await sendFollowUp(message.fromPhone, buildCompletionFollowUp({ completion, tappedNumber: tap.number, actions }), userId);
+  } catch (followUpError) {
+    console.error("[whatsapp-inbound] follow-up failed", followUpError);
+  }
+}
+
+/**
+ * "All done" completes the recap's actions one at a time: profile points are
+ * read then written, so parallel completions could lose some. If one throws,
+ * Meta's retry runs the tap again and the finished ones come back as
+ * already_done.
+ */
+async function handleRecapTap(admin: AdminClient, message: WhatsAppInboundMessage, tap: RecapTap) {
+  const userId = await tapUserId(admin, message);
+  if (!userId) return;
+
+  const completions: WhatsAppCompletion[] = [];
+  if (tap.kind === "all") {
+    for (const actionId of tap.actionIds) completions.push(await completeActionFromWhatsApp(admin, userId, actionId));
+  }
+
+  // Best effort from here, as in handleDoneTap.
+  try {
+    const followUp =
+      tap.kind === "all"
+        ? buildRecapAllDoneFollowUp(completions)
+        : buildRecapSomeDoneFollowUp(await loadReminderActionStates(admin, userId, tap.actionIds));
+    await sendFollowUp(message.fromPhone, followUp, userId);
+  } catch (followUpError) {
+    console.error("[whatsapp-inbound] follow-up failed", followUpError);
+  }
+}
+
+/** The participant behind a tap, or null after telling an unknown number so. */
+async function tapUserId(admin: AdminClient, message: WhatsAppInboundMessage): Promise<string | null> {
   const { data: contact, error } = await admin
     .from("whatsapp_contacts")
     .select("user_id")
@@ -105,33 +162,21 @@ async function handleDoneTap(admin: AdminClient, message: WhatsAppInboundMessage
   if (error) throw new Error(`load contact: ${error.message}`);
   if (!contact) {
     await sendReply(message.fromPhone, REPLIES.notConnected, null, "whatsapp_action_done");
+    return null;
+  }
+  return contact.user_id as string;
+}
+
+async function sendFollowUp(to: string, followUp: FollowUpMessage, userId: string) {
+  if (!isWhatsAppSendConfigured()) {
+    console.warn("[whatsapp-inbound] action saved but no reply sent: WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN not set");
     return;
   }
-
-  const userId = contact.user_id as string;
-  const completion = await completeActionFromWhatsApp(admin, userId, tap.actionId);
-  // Best effort from here: the action is saved, so a failed follow-up must
-  // not make Meta retry the tap.
-  try {
-    const actions = await loadReminderActionStates(admin, userId, tap.reminderActionIds);
-    const followUp = buildCompletionFollowUp({ completion, tappedNumber: tap.number, actions });
-    if (!isWhatsAppSendConfigured()) {
-      console.warn("[whatsapp-inbound] action saved but no reply sent: WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN not set");
-      return;
-    }
-    const result =
-      followUp.kind === "text"
-        ? await sendWhatsAppText({ to: message.fromPhone, body: followUp.body, userId, purpose: "whatsapp_action_done" })
-        : await sendWhatsAppInteractive({
-            to: message.fromPhone,
-            interactive: followUp.interactive,
-            userId,
-            purpose: "whatsapp_action_done",
-          });
-    if (!result.ok) console.error("[whatsapp-inbound] follow-up failed", { error: result.error });
-  } catch (followUpError) {
-    console.error("[whatsapp-inbound] follow-up failed", followUpError);
-  }
+  const result =
+    followUp.kind === "text"
+      ? await sendWhatsAppText({ to, body: followUp.body, userId, purpose: "whatsapp_action_done" })
+      : await sendWhatsAppInteractive({ to, interactive: followUp.interactive, userId, purpose: "whatsapp_action_done" });
+  if (!result.ok) console.error("[whatsapp-inbound] follow-up failed", { error: result.error });
 }
 
 /** Best-effort confirmation; a failed reply never fails the webhook. */
