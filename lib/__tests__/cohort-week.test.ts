@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  chartWeekCount,
   elapsedWeekCount,
   formatWeekRangeLabel,
   sharedWeekAnchor,
@@ -50,6 +51,45 @@ describe("elapsedWeekCount", () => {
 
   it("opens week 2 at IST midnight of the 8th calendar day", () => {
     expect(elapsedWeekCount([surgeAnchor], new Date("2026-08-31T04:23:00.000Z"))).toBe(2);
+  });
+});
+
+describe("chartWeekCount", () => {
+  const anchor = weekAnchorFromIstDate("2026-08-24");
+  const anchors = new Map([["batch", anchor]]);
+  const weekEleven = new Date("2026-11-05T06:00:00.000Z");
+  const weekThree = new Date("2026-09-08T06:00:00.000Z");
+
+  it("stops a finished batch at its programme length", () => {
+    expect(chartWeekCount(anchors, new Map([["batch", 6]]), [], weekEleven)).toBe(6);
+  });
+
+  it("keeps real activity after the programme ended", () => {
+    expect(chartWeekCount(anchors, new Map([["batch", 6]]), [1, 6, 7], weekEleven)).toBe(7);
+  });
+
+  it("keeps counting elapsed weeks when the batch has no programme length", () => {
+    expect(chartWeekCount(anchors, new Map([["batch", null]]), [7], weekEleven)).toBe(11);
+  });
+
+  it("shows only elapsed weeks for a running batch", () => {
+    expect(chartWeekCount(anchors, new Map([["batch", 6]]), [], weekThree)).toBe(3);
+  });
+
+  it("ignores data scheduled for weeks that have not started", () => {
+    expect(chartWeekCount(anchors, new Map([["batch", 6]]), [5], weekThree)).toBe(3);
+  });
+
+  it("uses the longest batch when several are combined", () => {
+    const both = new Map([
+      ["finished", anchor],
+      ["running", weekAnchorFromIstDate("2026-10-08")],
+    ]);
+    const limits = new Map([
+      ["finished", 6],
+      ["running", 6],
+    ]);
+    expect(chartWeekCount(both, limits, [], weekEleven)).toBe(6);
   });
 });
 

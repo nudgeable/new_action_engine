@@ -233,7 +233,7 @@ export function AdminSidebar({ displayName }: AdminSidebarProps) {
       {/* Back to app */}
       <Link
         href="/journey"
-        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 mb-2 rounded-xl text-sm font-semibold transition-all"
+        className="mx-4 flex items-center justify-center gap-2 px-3 py-2.5 mb-2 rounded-xl text-sm font-semibold transition-all"
         style={{
           background: "rgba(255,206,0,0.12)",
           color: "var(--bright-amber)",

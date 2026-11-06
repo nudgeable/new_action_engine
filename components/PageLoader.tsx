@@ -1,14 +1,21 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useState } from "react";
+
+const MESSAGE_INTERVAL_MS = 5000;
 
 type PageLoaderProps = {
   /** Optional status text under the animation */
   label?: string;
+  /** Status lines shown in turn in place of `label`, holding on the last one. */
+  messages?: readonly string[];
   /** Optional second line under the label — lighter weight, for a short explanatory note (e.g. an expected wait time) */
   sublabel?: string;
   /**
    * Where the overlay sits:
    * - main: participant content area (keeps sidebar clear)
-   * - admin: admin content area (keeps admin sidebar clear)
+   * - admin: admin content area (keeps admin sidebar clear); always a plain
+   *   spinner card rather than a themed animation
    * - fullscreen: entire viewport (auth, etc.)
    */
   variant?: "main" | "admin" | "fullscreen";
@@ -115,8 +122,24 @@ function WalletBucketLoader() {
  * the visible area so tab switches don't push the centerpiece into the
  * wrong place.
  */
-export default function PageLoader({ label, sublabel, variant = "fullscreen", theme = "default" }: PageLoaderProps) {
-  const resolvedLabel = label ?? (theme === "wallet" ? "Transferring to your Commitment Points" : undefined);
+export default function PageLoader({ label, messages, sublabel, variant = "fullscreen", theme = "default" }: PageLoaderProps) {
+  const [messageIndex, setMessageIndex] = useState(0);
+  const messageCount = messages?.length ?? 0;
+
+  useEffect(() => {
+    if (messageCount < 2) return;
+    const timer = setInterval(
+      () => setMessageIndex((index) => Math.min(index + 1, messageCount - 1)),
+      MESSAGE_INTERVAL_MS
+    );
+    return () => clearInterval(timer);
+  }, [messageCount]);
+
+  const isAdmin = variant === "admin";
+  const resolvedLabel =
+    messages?.[messageIndex] ??
+    label ??
+    (isAdmin ? "Loading…" : theme === "wallet" ? "Transferring to your Commitment Points" : undefined);
   return (
     <div
       className={`page-loader page-loader--${variant}`}
@@ -125,12 +148,14 @@ export default function PageLoader({ label, sublabel, variant = "fullscreen", th
       aria-busy="true"
     >
       <div className="page-loader__content">
-        {theme === "wallet" ? (
+        {isAdmin ? (
+          <span className="page-loader__spinner" aria-hidden="true" />
+        ) : theme === "wallet" ? (
           <WalletBucketLoader />
         ) : (
           <NudgieLoader src={NUDGIE_LOADER_SRC[theme]} />
         )}
-        {resolvedLabel ? <p className="page-loader__label">{resolvedLabel}</p> : null}
+        {resolvedLabel ? <p key={resolvedLabel} className="page-loader__label">{resolvedLabel}</p> : null}
         {sublabel ? <p className="page-loader__sublabel">{sublabel}</p> : null}
         <span className="sr-only">{[resolvedLabel, sublabel].filter(Boolean).join(" — ") || "Loading"}</span>
       </div>

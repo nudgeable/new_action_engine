@@ -12,7 +12,7 @@
  * Wallet rollup math.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
-import { elapsedWeekCount, resolveCohortWeekAnchors, sharedWeekAnchor, weekNumberFor, weekRangeFields } from "@/lib/cohort-week";
+import { chartWeekCount, resolveCohortMaxWeeks, resolveCohortWeekAnchors, sharedWeekAnchor, weekNumberFor, weekRangeFields } from "@/lib/cohort-week";
 import {
   getAdminContext,
   loadCommitmentWalletByCohort,
@@ -136,8 +136,6 @@ export async function getActionCompletionWeeklyTrend(
       .in("user_id", userIds)
       .not("scheduled_at", "is", null);
 
-    const maxWeek = elapsedWeekCount(anchors.values());
-
     const weeklyMap = new Map<number, { due: number; completed: number }>();
     for (const row of (uaRows ?? []) as { cohort_id: string | null; status: string; scheduled_at: string }[]) {
       const anchor = row.cohort_id ? anchors.get(row.cohort_id) : undefined;
@@ -148,6 +146,8 @@ export async function getActionCompletionWeeklyTrend(
       if (row.status === "success") bucket.completed += 1;
       weeklyMap.set(week, bucket);
     }
+
+    const maxWeek = chartWeekCount(anchors, await resolveCohortMaxWeeks(admin, cohortIds), weeklyMap.keys());
 
     const displayAnchor = sharedWeekAnchor(anchors.values());
     const entries: ActionWeeklyTrendEntry[] = [];
@@ -425,6 +425,130 @@ export async function getDashboardLeaderboard(
   }
 }
 
+export type ParticipantActionStatus =
+  | "completed"
+  | "current"
+  | "pending_validation"
+  | "not_completed"
+  | "not_sent";
+
+export interface ParticipantActionRow {
+  id: string;
+  title: string;
+  status: ParticipantActionStatus;
+  /** When the plan holding this action was finalised; null for actions outside a wallet plan. */
+  plannedAt: string | null;
+  /** When the action was delivered; null until it goes out. */
+  sentAt: string | null;
+  completedAt: string | null;
+  completedVia: "app" | "whatsapp" | null;
+}
+
+/** Same Current / Pending validation / Didn't complete split as the leaderboard's counts. */
+function participantActionStatus(
+  ua: { status: string; auto_expired: boolean | null } | undefined
+): ParticipantActionStatus {
+  if (!ua) return "not_sent";
+  if (ua.status === "success") return "completed";
+  if (ua.status === "scheduled") return "current";
+  return ua.status === "failed" && ua.auto_expired ? "pending_validation" : "not_completed";
+}
+
+/** Every action a participant planned in scope, with when it was planned, sent and completed.
+ * Actions sent outside a wallet plan are included too, so the list matches "Actions sent". */
+export async function getParticipantActionTimeline(
+  userId: string,
+  companyId?: string | null,
+  cohortId?: string | null
+): Promise<{ rows: ParticipantActionRow[]; error?: string }> {
+  try {
+    const { companyId: myCompanyId, role } = await getAdminContext();
+    const resolvedCompanyId = role === "admin" ? myCompanyId : companyId;
+    if (!resolvedCompanyId) return { rows: [], error: "Company required" };
+
+    const admin = createAdminClient();
+
+    // The caller supplies these ids, so confirm the batch and participant are in
+    // this company before reading anything: the admin client bypasses RLS.
+    if (cohortId) {
+      const { data: cohort } = await admin
+        .from("cohorts")
+        .select("id")
+        .eq("id", cohortId)
+        .eq("company_id", resolvedCompanyId)
+        .maybeSingle();
+      if (!cohort) return { rows: [], error: "Batch not found" };
+    }
+    const scopedUserIds = await resolveScopedUserIds(admin, resolvedCompanyId, cohortId ?? null);
+    if (!scopedUserIds.includes(userId)) return { rows: [], error: "Participant not found" };
+
+    const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
+    if (!cohortIds.length) return { rows: [] };
+
+    const [plansResult, walletActionsResult, userActionsResult] = await Promise.all([
+      admin.from("commitment_wallet_plans").select("id, finalised_at").eq("user_id", userId).in("cohort_id", cohortIds),
+      admin.from("commitment_wallet_actions").select("action_id, plan_id").eq("user_id", userId).in("cohort_id", cohortIds),
+      admin
+        .from("user_actions")
+        .select("action_id, status, auto_expired, scheduled_at, created_at, completed_at, completed_via")
+        .eq("user_id", userId)
+        .in("cohort_id", cohortIds),
+    ]);
+    const queryError = plansResult.error ?? walletActionsResult.error ?? userActionsResult.error;
+    if (queryError) return { rows: [], error: queryError.message };
+
+    const finalisedAtByPlan = new Map(
+      ((plansResult.data ?? []) as { id: string; finalised_at: string }[]).map((plan) => [plan.id, plan.finalised_at])
+    );
+    const plannedAtByAction = new Map(
+      ((walletActionsResult.data ?? []) as { action_id: string; plan_id: string }[]).map((row) => [
+        row.action_id,
+        finalisedAtByPlan.get(row.plan_id) ?? null,
+      ])
+    );
+    const userActionByAction = new Map(
+      (
+        (userActionsResult.data ?? []) as {
+          action_id: string;
+          status: string;
+          auto_expired: boolean | null;
+          scheduled_at: string | null;
+          created_at: string;
+          completed_at: string | null;
+          completed_via: "app" | "whatsapp" | null;
+        }[]
+      ).map((row) => [row.action_id, row])
+    );
+
+    const actionIds = [...new Set([...plannedAtByAction.keys(), ...userActionByAction.keys()])];
+    if (!actionIds.length) return { rows: [] };
+
+    const { data: actions, error: actionsError } = await admin
+      .from("actions")
+      .select("id, title, plan_order, created_at")
+      .in("id", actionIds)
+      .order("plan_order", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
+    if (actionsError) return { rows: [], error: actionsError.message };
+
+    const rows = ((actions ?? []) as { id: string; title: string }[]).map((action) => {
+      const ua = userActionByAction.get(action.id);
+      return {
+        id: action.id,
+        title: action.title,
+        status: participantActionStatus(ua),
+        plannedAt: plannedAtByAction.get(action.id) ?? null,
+        sentAt: ua ? ua.scheduled_at ?? ua.created_at : null,
+        completedAt: ua?.status === "success" ? ua.completed_at : null,
+        completedVia: ua?.status === "success" ? ua.completed_via : null,
+      };
+    });
+    return { rows };
+  } catch (e) {
+    return { rows: [], error: e instanceof Error ? e.message : "Failed to load actions" };
+  }
+}
+
 export interface CommitmentWeeklyTrendEntry {
   weekNumber: number;
   avgCommitmentPct: number;
@@ -481,7 +605,17 @@ export async function getBatchCommitmentWeeklyTrend(
       eventsByPlan.set(e.plan_id, list);
     }
 
-    const maxWeek = elapsedWeekCount(anchors.values());
+    // Only misses move the score, so a later non-miss event doesn't extend the axis.
+    const scoreWeeks: number[] = [];
+    for (const plan of planRows) {
+      const anchor = anchors.get(plan.cohort_id);
+      if (!anchor) continue;
+      scoreWeeks.push(weekNumberFor(new Date(plan.finalised_at), anchor));
+      for (const e of eventsByPlan.get(plan.id) ?? []) {
+        if (e.missed) scoreWeeks.push(weekNumberFor(new Date(e.settledAt), anchor));
+      }
+    }
+    const maxWeek = chartWeekCount(anchors, await resolveCohortMaxWeeks(admin, cohortIds), scoreWeeks);
 
     // Same formula as get_my_commitment_wallet() / the /wallet page (see walletScorePct) —
     // outstanding misses only, tracked cumulatively per week.
@@ -801,9 +935,9 @@ export async function getEmailOpenRates(
     };
 
     const displayAnchor = sharedWeekAnchor(anchors.values());
-    // Same 1..elapsed-week axis as the other dashboard charts, so a new week
-    // is visible even before any reminder has gone out that week.
-    const maxWeek = Math.max(elapsedWeekCount(anchors.values()), ...weeklyMap.keys(), 1);
+    // Same axis as the other dashboard charts, so a new week is visible even
+    // before any reminder has gone out that week.
+    const maxWeek = chartWeekCount(anchors, await resolveCohortMaxWeeks(admin, cohortIds), weeklyMap.keys());
     const weekly: EmailOpenWeeklyEntry[] = weeklyMap.size
       ? Array.from({ length: maxWeek }, (_, i) => {
           const week = i + 1;
