@@ -5052,6 +5052,13 @@ input[type="range"] {
   animation: page-loader-spin 0.8s linear infinite;
 }
 
+@keyframes page-loader-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
 @keyframes page-loader-spin {
   to {
     transform: rotate(360deg);
@@ -5062,9 +5069,14 @@ input[type="range"] {
   .page-loader__spinner {
     animation-duration: 2.4s;
   }
+
+  .page-loader--admin .page-loader__label {
+    animation: none;
+  }
 }
 
 .page-loader--admin .page-loader__label {
+  animation: page-loader-message-in 0.3s ease-out;
   color: var(--color-text-primary);
   font-size: 14px;
   font-weight: 600;

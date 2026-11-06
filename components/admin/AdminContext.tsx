@@ -17,6 +17,13 @@ const CONFIRMED_STORAGE_KEY = "nudgeable:admin:batchConfirmed";
 // Who confirmed the remembered batch. A remembered batch only counts for that
 // same user, so anyone else signing in on this tab still gets the pop-out.
 const OWNER_STORAGE_KEY = "nudgeable:admin:batchOwner";
+const BATCH_LOADING_MESSAGES = [
+  "Filtering records for your selection…",
+  "Checking data…",
+  "Sorting data…",
+  "Generating charts…",
+  "Almost ready…",
+] as const;
 
 /** Clears the remembered company/batch selection so the next login always
  * lands back on the BatchPickerGate pop-out instead of silently reusing
@@ -318,7 +325,7 @@ export function BatchPickerGate({ children }: { children: React.ReactNode }) {
         {role !== "superadmin" && !viewReady && (
           <PageLoader
             variant="admin"
-            label="Loading batch data…"
+            messages={BATCH_LOADING_MESSAGES}
             sublabel="Fetching charts and metrics — this'll only take a moment."
           />
         )}
