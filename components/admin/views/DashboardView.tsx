@@ -186,7 +186,8 @@ interface DashboardViewProps {
 
 export function DashboardView({ companyId }: DashboardViewProps) {
   const { selectedCohortId, setViewReady, setContextBarSlot } = useAdminContext();
-  const { options: batchOptions, loading: batchOptionsLoading } = useBatchOptions(companyId);
+  // Options aren't shown here any more, but their loading still gates the page loader.
+  const { loading: batchOptionsLoading } = useBatchOptions(companyId);
   // ── Batch/module drill-down (selector + buckets, leaderboard, weekly trend, email opens) ──
   const [actionWeeklyTrend, setActionWeeklyTrend] = useState<ActionWeeklyTrendEntry[]>([]);
   const [actionWeeklyLoading, setActionWeeklyLoading] = useState(true);
@@ -349,13 +350,6 @@ export function DashboardView({ companyId }: DashboardViewProps) {
     "Avg. commitment %": e.avgCommitmentPct,
   }));
 
-  const selectedBatch = batchOptions.find((option) => option.cohortId === selectedCohortId);
-  const batchSubtitle = selectedBatch
-    ? [selectedBatch.batchName, selectedBatch.moduleName].filter(Boolean).join(" — ")
-    : selectedCohortId === null
-      ? "All batches"
-      : null;
-
   const countCellStyle = (count: number) => ({
     color: count > 0 ? "var(--color-text-primary)" : "var(--color-text-muted)",
   });
@@ -393,10 +387,21 @@ export function DashboardView({ companyId }: DashboardViewProps) {
           <h2 className="text-2xl lg:text-3xl font-bold" style={{ color: "var(--color-text-primary)" }}>
             Admin Dashboard
           </h2>
-          {batchSubtitle && (
-            <p className="text-sm font-medium" style={{ color: "var(--color-text-muted)" }}>
-              {batchSubtitle}
-            </p>
+          {/* Program progress beside the batch name, e.g. "2 of 6 weeks". */}
+          {!programProgressLoading && programProgress && (
+            <span
+              className="inline-flex items-center gap-1.5 self-center rounded-full px-3 py-1 text-sm font-semibold"
+              style={{ background: "#EDE9FE", color: "var(--color-text-primary)" }}
+              title="Current week of the program"
+            >
+              <CalendarRange size={15} style={{ color: CHART_PRIMARY }} />
+              {programProgress.maxWeeks
+                ? `${programProgress.currentWeek} of ${programProgress.maxWeeks} weeks`
+                : `Week ${programProgress.currentWeek}`}
+              {programProgress.ended && (
+                <span className="font-medium" style={{ color: CHART_PRIMARY }}>· completed</span>
+              )}
+            </span>
           )}
         </div>
         {/* The batch/module selector lands here instead of on its own row above the page. */}
@@ -407,7 +412,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
       <div className="space-y-4">
         {/* Users who've finalised an action plan — same "made a plan" signal as the
             Leaderboard's "No plan" tag (commitmentMaximum > 0), so the two numbers agree. */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
           <StatCard
             title="Action Plans Designed"
             value={scoreBucketsLoading ? "…" : plansDesigned}
@@ -446,34 +451,6 @@ export function DashboardView({ companyId }: DashboardViewProps) {
             icon={TrendingUp}
             tint="#EDE9FE"
             ink={CHART_PRIMARY}
-          />
-          <StatCard
-            title="Program Progress"
-            value={programProgressLoading ? "…" : programProgress ? programProgress.currentWeek : "—"}
-            unit={
-              programProgressLoading || !programProgress
-                ? undefined
-                : programProgress.maxWeeks
-                  ? `of ${programProgress.maxWeeks} weeks`
-                  : "weeks"
-            }
-            progress={
-              programProgress?.maxWeeks ? pctOf(programProgress.currentWeek, programProgress.maxWeeks) : null
-            }
-            note={
-              programProgressLoading
-                ? "…"
-                : !programProgress
-                  ? "No program dates yet"
-                  : programProgress.ended
-                    ? "Program completed"
-                    : programProgress.maxWeeks
-                      ? "Current week of program"
-                      : "Current week · no length set"
-            }
-            icon={CalendarRange}
-            tint="#FFEDD5"
-            ink="#C2410C"
           />
         </div>
 
