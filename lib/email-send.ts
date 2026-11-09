@@ -349,7 +349,14 @@ export async function sendTemplateToUsers({
         });
       }
 
-      const { error: logError } = await admin.from("email_campaign_logs").insert({
+      // Actions this email lists, so its open can be tied to each one (admin "Seen on").
+      const listedActionIds =
+        (templateKey === "daily_reminder" || templateKey === "weekly_recap") && Array.isArray(dynamicTemplateData.actions)
+          ? (dynamicTemplateData.actions as Record<string, unknown>[])
+              .map((action) => (typeof action.id === "string" ? action.id : undefined))
+              .filter((id): id is string => Boolean(id))
+          : [];
+      const sentLog = {
         user_id: userId,
         email,
         template_id: templateId,
@@ -357,7 +364,14 @@ export async function sendTemplateToUsers({
         sent_by: sentBy,
         resend_message_id: resendMessageId,
         cohort_id: prof?.cohortId ?? null,
-      });
+      };
+      let { error: logError } = await admin
+        .from("email_campaign_logs")
+        .insert(listedActionIds.length ? { ...sentLog, action_ids: listedActionIds } : sentLog);
+      // If migration 087 (action_ids) isn't applied yet, still keep the send log.
+      if (logError && listedActionIds.length) {
+        ({ error: logError } = await admin.from("email_campaign_logs").insert(sentLog));
+      }
       if (logError) {
         console.error("[email-send] failed to write campaign log", logError.message);
       }

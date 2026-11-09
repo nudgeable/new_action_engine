@@ -78,6 +78,8 @@ export async function sendWhatsAppTemplate(params: {
   components: TemplateComponent[];
   userId?: string | null;
   purpose: string;
+  /** Actions this message lists, so its read receipt can be tied to each one. */
+  actionIds?: string[];
 }): Promise<WhatsAppSendResult> {
   const to = params.to.replace(/\D/g, "");
   const result = await postMessage({
@@ -98,6 +100,7 @@ export async function sendWhatsAppTemplate(params: {
     userId: params.userId ?? null,
     purpose: params.purpose,
     templateName: params.template.name,
+    actionIds: params.actionIds,
   });
   return result;
 }
@@ -143,6 +146,7 @@ async function recordAcceptedMessage(params: {
   userId: string | null;
   purpose: string;
   templateName?: string;
+  actionIds?: string[];
 }) {
   const admin = createAdminClient();
   const { error: insertError } = await admin
@@ -162,5 +166,16 @@ async function recordAcceptedMessage(params: {
       wamid: params.wamid,
       error: insertError?.message ?? updateError?.message,
     });
+  }
+  // Separate write so a missing action_ids column (migration 087 not applied yet)
+  // can't stop the who/why above from being recorded.
+  if (params.actionIds?.length) {
+    const { error: actionIdsError } = await admin
+      .from("whatsapp_message_logs")
+      .update({ action_ids: params.actionIds })
+      .eq("wamid", params.wamid);
+    if (actionIdsError) {
+      console.error("[whatsapp] failed to record listed actions", { wamid: params.wamid, error: actionIdsError.message });
+    }
   }
 }

@@ -124,6 +124,7 @@ export async function sendPreparedWhatsAppReminder(
     components,
     userId: prepared.sub.user_id,
     purpose,
+    actionIds: prepared.actions.map((action) => action.id),
   });
   return { result, templateName: template.name };
 }
