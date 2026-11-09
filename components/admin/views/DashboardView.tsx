@@ -276,7 +276,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
 
   // Participant activity split, from validated vs. sent actions per member:
   // inactive = nothing validated; highly active = more than half of sent actions
-  // validated; somewhat active = everyone in between (above 0%, up to 50%).
+  // validated; partly active = everyone in between (above 0%, up to 50%).
   const activityChartData = (() => {
     let inactive = 0;
     let somewhat = 0;
@@ -288,7 +288,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
     }
     return [
       { key: "inactive", name: "Inactive", hint: "0 actions validated", Users: inactive, color: ACTIVITY_COLORS.inactive },
-      { key: "somewhat", name: "Somewhat active", hint: "Up to 50% validated", Users: somewhat, color: ACTIVITY_COLORS.somewhat },
+      { key: "somewhat", name: "Partly active", hint: "Up to 50% validated", Users: somewhat, color: ACTIVITY_COLORS.somewhat },
       { key: "highly", name: "Highly active", hint: "Over 50% validated", Users: highly, color: ACTIVITY_COLORS.highly },
     ];
   })();
