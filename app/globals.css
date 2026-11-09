@@ -5075,6 +5075,23 @@ input[type="range"] {
   }
 }
 
+/* Participant actions popup: same spinner + fading status line as the admin loader. */
+.participant-loader__spinner {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 0;
+}
+
+.participant-loader__label {
+  animation: page-loader-message-in 0.3s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .participant-loader__label {
+    animation: none;
+  }
+}
+
 .page-loader--admin .page-loader__label {
   animation: page-loader-message-in 0.3s ease-out;
   color: var(--color-text-primary);

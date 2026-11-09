@@ -11,8 +11,10 @@ import {
   Tooltip,
   ResponsiveContainer,
   LabelList,
+  PieChart,
+  Pie,
 } from "recharts";
-import { ArrowDown, ArrowUp, Check, CircleCheck, Lightbulb, Mail, Target } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarRange, CircleCheck, ListChecks, Target, TrendingUp } from "lucide-react";
 import { useAdminContext } from "@/components/admin/AdminContext";
 import { useBatchOptions } from "@/components/admin/BatchSelector";
 import { ParticipantActionsModal } from "@/components/admin/ParticipantActionsModal";
@@ -23,6 +25,8 @@ import {
   getDashboardLeaderboard,
   getBatchCommitmentWeeklyTrend,
   getEmailOpenRates,
+  getProgramProgress,
+  type ProgramProgress,
   type ActionWeeklyTrendEntry,
   type CommitmentScoreBuckets,
   type DashboardLeaderboardEntry,
@@ -34,7 +38,8 @@ import {
 // it's read against, and the score bands step light→dark so higher reads stronger.
 const CHART_PRIMARY = "#6636E8";
 const CHART_BASELINE = "#D4D4D8";
-const SCORE_BAND_COLORS = ["#D9D2FB", "#B49EF3", "#8460EC", CHART_PRIMARY];
+// Activity groups: inactive reads as baseline gray, then purple deepens with activity.
+const ACTIVITY_COLORS = { inactive: CHART_BASELINE, somewhat: "#B49EF3", highly: CHART_PRIMARY };
 const TABLE_HEAD_BG = "#EDE9FE";
 // Right-hand edge of the frozen Rank / Name column, so scrolled cells read as passing under it.
 const FROZEN_COLUMN_EDGE = "1px 0 0 var(--color-border-strong)";
@@ -99,6 +104,37 @@ function StatCard({
   );
 }
 
+/** User count drawn in the middle of each donut slice; skipped for empty or very thin slices. */
+function renderActivitySliceLabel(props: {
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  innerRadius?: number;
+  outerRadius?: number;
+  percent?: number;
+  value?: number;
+  payload?: { key?: string };
+}) {
+  const { cx = 0, cy = 0, midAngle = 0, innerRadius = 0, outerRadius = 0, percent = 0, value = 0, payload } = props;
+  if (!value || percent < 0.04) return null;
+  const radius = innerRadius + (outerRadius - innerRadius) / 2;
+  const angle = (-midAngle * Math.PI) / 180;
+  // Light slices (inactive gray, light purple) need dark text; the deep purple slice takes white.
+  const fill = payload?.key === "highly" ? "#FFFFFF" : "#1F1B2E";
+  return (
+    <text
+      x={cx + radius * Math.cos(angle)}
+      y={cy + radius * Math.sin(angle)}
+      fill={fill}
+      textAnchor="middle"
+      dominantBaseline="central"
+      style={{ fontSize: 12, fontWeight: 700 }}
+    >
+      {value}
+    </text>
+  );
+}
+
 function LegendKey({ color, label }: { color: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
@@ -129,13 +165,15 @@ export function DashboardView({ companyId }: DashboardViewProps) {
   const [weeklyTrendLoading, setWeeklyTrendLoading] = useState(true);
   const [emailWeekly, setEmailWeekly] = useState<EmailOpenWeeklyEntry[]>([]);
   const [emailLoading, setEmailLoading] = useState(true);
+  const [programProgress, setProgramProgress] = useState<ProgramProgress | null>(null);
+  const [programProgressLoading, setProgramProgressLoading] = useState(true);
 
   // All sections fetch independently; rather than letting each one pop
   // in on its own timeline, report readiness up to BatchPickerGate once every
   // section has settled at least once for this company/cohort, so its
   // loading screen — not an assumption that picking a batch means the data
   // is there — is what decides when the dashboard actually shows.
-  const dashboardReady = !actionWeeklyLoading && !scoreBucketsLoading && !leaderboardLoading && !weeklyTrendLoading && !emailLoading && !batchOptionsLoading;
+  const dashboardReady = !actionWeeklyLoading && !scoreBucketsLoading && !leaderboardLoading && !weeklyTrendLoading && !emailLoading && !programProgressLoading && !batchOptionsLoading;
 
   useEffect(() => {
     setViewReady(dashboardReady);
@@ -202,6 +240,17 @@ export function DashboardView({ companyId }: DashboardViewProps) {
       .finally(() => setEmailLoading(false));
   }, [companyId, selectedCohortId]);
 
+  useEffect(() => {
+    if (!companyId) {
+      setProgramProgress(null);
+      return;
+    }
+    setProgramProgressLoading(true);
+    getProgramProgress(companyId, selectedCohortId)
+      .then(({ progress, error }) => setProgramProgress(!error ? progress : null))
+      .finally(() => setProgramProgressLoading(false));
+  }, [companyId, selectedCohortId]);
+
   const tooltipStyle = {
     borderRadius: "12px",
     border: "1px solid var(--color-border)",
@@ -225,44 +274,32 @@ export function DashboardView({ companyId }: DashboardViewProps) {
     "Actions completed": e.completed,
   }));
 
-  const scoreBucketChartData = scoreBuckets
-    ? [
-      { name: "Below 50%", Users: scoreBuckets.belowBand50 },
-      { name: "50–74%", Users: scoreBuckets.band50to74 },
-      { name: "75–89%", Users: scoreBuckets.band75to89 },
-      { name: "90–100%", Users: scoreBuckets.band90to100 },
-    ]
-    : [];
+  // Participant activity split, from validated vs. sent actions per member:
+  // inactive = nothing validated; highly active = more than half of sent actions
+  // validated; somewhat active = everyone in between (above 0%, up to 50%).
+  const activityChartData = (() => {
+    let inactive = 0;
+    let somewhat = 0;
+    let highly = 0;
+    for (const u of leaderboard) {
+      if (u.validatedCount === 0) inactive++;
+      else if (u.actionsSentCount > 0 && u.validatedCount / u.actionsSentCount > 0.5) highly++;
+      else somewhat++;
+    }
+    return [
+      { key: "inactive", name: "Inactive", hint: "0 actions validated", Users: inactive, color: ACTIVITY_COLORS.inactive },
+      { key: "somewhat", name: "Somewhat active", hint: "Up to 50% validated", Users: somewhat, color: ACTIVITY_COLORS.somewhat },
+      { key: "highly", name: "Highly active", hint: "Over 50% validated", Users: highly, color: ACTIVITY_COLORS.highly },
+    ];
+  })();
+  const activityTotal = leaderboard.length;
+  const highlyActiveCount = activityChartData.find((d) => d.key === "highly")?.Users ?? 0;
 
   const weeklyTrendChartData = weeklyTrend.map((e) => ({
     name: `Week ${e.weekNumber}`,
     weekRange: weekChartRange(e.weekStartIst, e.weekEndIst),
     "Avg. commitment %": e.avgCommitmentPct,
   }));
-
-  // Weekly average of unique "either mail" openers/reach, for the "avg of users who
-  // open either mail" stat card — averaged per week rather than a lifetime union.
-  const eitherWeeklyAvgStats = (() => {
-    if (emailWeekly.length === 0) return { avgOpenedUsers: 0, avgReachUsers: 0 };
-    const totalOpened = emailWeekly.reduce((sum, e) => sum + e.eitherMailOpenedUsers, 0);
-    const totalReach = emailWeekly.reduce((sum, e) => sum + e.eitherMailUsers, 0);
-    return {
-      avgOpenedUsers: Math.round(totalOpened / emailWeekly.length),
-      avgReachUsers: Math.round(totalReach / emailWeekly.length),
-    };
-  })();
-
-  // Of users who've activated a plan (commitmentMaximum > 0, same signal as the
-  // "Activated action plan" card), how many have validated at least one action.
-  const validationRateStats = (() => {
-    const planned = leaderboard.filter((u) => u.commitmentMaximum > 0);
-    const validatedAtLeastOne = planned.filter((u) => u.validatedCount > 0).length;
-    return {
-      plannedCount: planned.length,
-      validatedAtLeastOne,
-      pct: planned.length > 0 ? Math.round((validatedAtLeastOne * 100) / planned.length) : 0,
-    };
-  })();
 
   const selectedBatch = batchOptions.find((option) => option.cohortId === selectedCohortId);
   const batchSubtitle = selectedBatch
@@ -275,6 +312,15 @@ export function DashboardView({ companyId }: DashboardViewProps) {
     color: count > 0 ? "var(--color-text-primary)" : "var(--color-text-muted)",
   });
   const headCellStyle = { color: "var(--color-text-primary)" };
+  // A rate cell: bold % with the underlying count on hover; "—" when nothing went out that week.
+  const engagementRate = (rate: number, hits: number, sent: number, verb: string) =>
+    sent === 0 ? (
+      <span style={{ color: "var(--color-text-muted)" }}>—</span>
+    ) : (
+      <span className="font-bold" style={{ color: "var(--color-text-primary)" }} title={`${hits} of ${sent} ${verb}`}>
+        {rate}%
+      </span>
+    );
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
@@ -298,8 +344,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
       {/* ── BATCH DRILL-DOWN ── */}
       <div className="space-y-4">
         {/* Users who've finalised an action plan — same "made a plan" signal as the
-            Leaderboard's "No plan" tag (commitmentMaximum > 0), so the two numbers agree.
-            Batch avg sits beside it (mean among activated users only). */}
+            Leaderboard's "No plan" tag (commitmentMaximum > 0), so the two numbers agree. */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
           <StatCard
             label="Activated action plan"
@@ -310,44 +355,45 @@ export function DashboardView({ companyId }: DashboardViewProps) {
             ink="#1D4ED8"
           />
           <StatCard
-            label="Batch avg commitment"
-            value={
-              scoreBucketsLoading
-                ? "…"
-                : scoreBuckets?.avgCommitmentPct != null
-                  ? `${scoreBuckets.avgCommitmentPct}%`
-                  : "—"
-            }
-            icon={Lightbulb}
+            label="Total actions generated"
+            value={leaderboardLoading ? "…" : leaderboard.reduce((sum, u) => sum + u.plannedActions, 0)}
+            icon={ListChecks}
             tint="#FEF3C7"
             ink="#B45309"
           />
           <StatCard
             label="Total actions validated"
             value={leaderboardLoading ? "…" : leaderboard.reduce((sum, u) => sum + u.validatedCount, 0)}
+            suffix={`of ${leaderboardLoading ? "…" : leaderboard.reduce((sum, u) => sum + u.actionsSentCount, 0)} sent`}
             icon={CircleCheck}
             tint="#DCFCE7"
             ink="#15803D"
           />
           <StatCard
-            label="Avg. users who opened either mail / week"
-            value={emailLoading ? "…" : eitherWeeklyAvgStats.avgOpenedUsers}
-            suffix={`of ${emailLoading ? "…" : eitherWeeklyAvgStats.avgReachUsers}`}
-            icon={Mail}
+            label="Validated over 50% of actions sent"
+            value={leaderboardLoading ? "…" : highlyActiveCount}
+            suffix={`of ${leaderboardLoading ? "…" : activityTotal} users`}
+            icon={TrendingUp}
             tint="#EDE9FE"
             ink={CHART_PRIMARY}
           />
           <StatCard
-            label="Validated at least 1 action"
-            value={leaderboardLoading ? "…" : `${validationRateStats.pct}%`}
-            suffix={leaderboardLoading ? "…" : `${validationRateStats.validatedAtLeastOne} of ${validationRateStats.plannedCount}`}
-            icon={Check}
+            label={programProgress?.ended ? "Current week of program · completed" : "Current week of program"}
+            value={programProgressLoading ? "…" : programProgress ? programProgress.currentWeek : "—"}
+            suffix={
+              programProgressLoading || !programProgress
+                ? undefined
+                : programProgress.maxWeeks
+                  ? `of ${programProgress.maxWeeks} weeks`
+                  : "no length set"
+            }
+            icon={CalendarRange}
             tint="#FFEDD5"
             ink="#C2410C"
           />
         </div>
 
-        {/* Weekly Action Completion (due vs. completed, left) + Commitment Score Distribution (bars, right) */}
+        {/* Weekly Action Completion (due vs. completed, left) + Participant Activity (pie, right) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <DashboardCard
             title="Weekly Action Completion"
@@ -383,32 +429,67 @@ export function DashboardView({ companyId }: DashboardViewProps) {
           </DashboardCard>
 
           <DashboardCard
-            title="Commitment Score Distribution"
+            title="Participant Activity"
             aside={
-              scoreBuckets && scoreBuckets.notStarted > 0 ? (
-                <span className="tag tag--yellow">{scoreBuckets.notStarted} not started (no plan yet)</span>
-              ) : undefined
+              <span className="text-xs font-medium" style={{ color: "var(--color-tag-primary-text)" }}>
+                By share of sent actions validated
+              </span>
             }
           >
             <div className="px-3 pb-3" style={{ height: 260 }}>
-              {scoreBucketsLoading ? (
+              {leaderboardLoading ? (
                 emptyState("Loading…")
-              ) : !scoreBuckets || scoreBuckets.totalUsers === 0 ? (
-                emptyState("No commitment data yet")
+              ) : activityTotal === 0 ? (
+                emptyState("No members in scope yet")
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <ReBarChart data={scoreBucketChartData} layout="vertical" margin={{ top: 0, right: 32, left: 4, bottom: 0 }}>
-                    <XAxis type="number" hide allowDecimals={false} domain={[0, "dataMax"]} />
-                    <YAxis type="category" dataKey="name" tick={{ ...axisTick, fontSize: 12 }} tickLine={false} axisLine={false} width={84} />
-                    <Tooltip contentStyle={tooltipStyle} cursor={chartCursor} formatter={(value) => [`${value} users`, "Users"]} />
-                    <Bar dataKey="Users" barSize={14} radius={[0, 3, 3, 0]}>
-                      {scoreBucketChartData.map((entry, index) => (
-                        <Cell key={entry.name} fill={SCORE_BAND_COLORS[index]} />
-                      ))}
-                      <LabelList dataKey="Users" position="right" offset={10} style={{ fontSize: 12, fontWeight: 700, fill: "var(--color-text-primary)" }} />
-                    </Bar>
-                  </ReBarChart>
-                </ResponsiveContainer>
+                <div className="h-full flex items-center gap-4">
+                  <div className="relative h-full flex-1 min-w-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Tooltip
+                          contentStyle={tooltipStyle}
+                          formatter={(value, name) => [`${value} users`, name]}
+                        />
+                        <Pie
+                          data={activityChartData}
+                          dataKey="Users"
+                          nameKey="name"
+                          innerRadius="58%"
+                          outerRadius="88%"
+                          paddingAngle={activityChartData.filter((d) => d.Users > 0).length > 1 ? 2 : 0}
+                          stroke="none"
+                          isAnimationActive={false}
+                          labelLine={false}
+                          label={renderActivitySliceLabel}
+                        >
+                          {activityChartData.map((entry) => (
+                            <Cell key={entry.key} fill={entry.color} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-2xl font-bold leading-none" style={{ color: "var(--color-text-primary)" }}>{activityTotal}</span>
+                      <span className="text-xs font-medium mt-1" style={{ color: "var(--color-text-muted)" }}>members</span>
+                    </div>
+                  </div>
+                  <ul className="flex flex-col gap-3 pr-3 flex-shrink-0">
+                    {activityChartData.map((entry) => (
+                      <li key={entry.key} className="flex items-start gap-2">
+                        <span className="w-2.5 h-2.5 rounded-sm mt-1 flex-shrink-0" style={{ background: entry.color }} />
+                        <span className="flex flex-col">
+                          <span className="text-xs font-semibold" style={{ color: "var(--color-text-primary)" }}>
+                            {entry.name} · {entry.Users}{" "}
+                            <span className="font-medium" style={{ color: "var(--color-text-muted)" }}>
+                              ({Math.round((entry.Users * 100) / activityTotal)}%)
+                            </span>
+                          </span>
+                          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{entry.hint}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           </DashboardCard>
@@ -527,7 +608,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
           />
         )}
 
-        {/* Batch Commitment Score (weekly trend + WoW delta, left) + Email Engagement (weekly table, right) */}
+        {/* Batch Commitment Score (weekly trend + WoW delta, left) + Email & WhatsApp Engagement (weekly table, right) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <DashboardCard
             title="Batch Commitment Score"
@@ -576,10 +657,10 @@ export function DashboardView({ companyId }: DashboardViewProps) {
           </DashboardCard>
 
           <DashboardCard
-            title="Email Engagement"
+            title="Email & WhatsApp Engagement"
             aside={
               <span className="text-xs font-medium" style={{ color: "var(--color-tag-primary-text)" }}>
-                Either · Reminder · Friday Weekly Recap
+                Email opened · WhatsApp read, per week
               </span>
             }
           >
@@ -589,15 +670,12 @@ export function DashboardView({ companyId }: DashboardViewProps) {
               ) : emailWeekly.length === 0 ? (
                 emptyState("No week-attributed sends yet")
               ) : (
-                <table className="w-full text-left border-collapse min-w-[460px] text-xs">
+                <table className="w-full text-left border-collapse min-w-[320px] text-xs">
                   <thead className="sticky top-0 z-10" style={{ background: TABLE_HEAD_BG }}>
                     <tr>
                       <th className="px-5 py-2.5 text-xs font-semibold" style={headCellStyle}>Week</th>
-                      <th className="px-2 py-2.5 text-xs font-semibold text-right" style={headCellStyle}>Reminder sent</th>
-                      <th className="px-2 py-2.5 text-xs font-semibold text-right" style={headCellStyle}>Reminder opened</th>
-                      <th className="px-2 py-2.5 text-xs font-semibold text-right" style={headCellStyle}>Recap sent</th>
-                      <th className="px-2 py-2.5 text-xs font-semibold text-right" style={headCellStyle}>Recap opened</th>
-                      <th className="pl-2 pr-5 py-2.5 text-xs font-semibold text-right" style={headCellStyle}>Either opened</th>
+                      <th className="px-2 py-2.5 text-xs font-semibold text-right" style={headCellStyle}>Email open %</th>
+                      <th className="pl-2 pr-5 py-2.5 text-xs font-semibold text-right" style={headCellStyle}>WhatsApp read %</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -608,11 +686,12 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                         style={{ borderBottom: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
                       >
                         <td className="px-5 py-3 font-semibold whitespace-nowrap" style={{ color: "var(--color-text-primary)" }}>Week {week.weekNumber}</td>
-                        <td className="px-2 py-3 text-right font-medium">{week.reminderSent}</td>
-                        <td className="px-2 py-3 text-right font-medium">{week.reminderOpenedUsers}</td>
-                        <td className="px-2 py-3 text-right font-medium">{week.recapSent}</td>
-                        <td className="px-2 py-3 text-right font-medium">{week.recapOpenedUsers}</td>
-                        <td className="pl-2 pr-5 py-3 text-right font-bold" style={{ color: "var(--color-text-primary)" }}>{week.eitherMailOpenedUsers}</td>
+                        <td className="px-2 py-3 text-right">
+                          {engagementRate(week.emailOpenRate, week.emailOpened, week.emailSent, "opened")}
+                        </td>
+                        <td className="pl-2 pr-5 py-3 text-right">
+                          {engagementRate(week.whatsappReadRate, week.whatsappRead, week.whatsappSent, "read")}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

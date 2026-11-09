@@ -326,7 +326,6 @@ export function BatchPickerGate({ children }: { children: React.ReactNode }) {
           <PageLoader
             variant="admin"
             messages={BATCH_LOADING_MESSAGES}
-            sublabel="Fetching charts and metrics — this'll only take a moment."
           />
         )}
       </>
