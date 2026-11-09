@@ -5075,6 +5075,245 @@ input[type="range"] {
   }
 }
 
+/* Admin batch loader: a checklist that ticks off step by step (AdminStepLoader). */
+.admin-step-loader {
+  width: min(400px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid #e7e3f5;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 18px 50px rgba(54, 32, 120, 0.14), 0 2px 6px rgba(54, 32, 120, 0.06);
+  text-align: left;
+}
+
+.admin-step-loader__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 20px 16px;
+  text-align: center;
+  background: linear-gradient(135deg, #f5f1ff 0%, #ffffff 75%);
+}
+
+.admin-step-loader__ring {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(102, 54, 232, 0.16);
+}
+
+.admin-step-loader__ring .page-loader__spinner {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  border-width: 2.5px;
+}
+
+.admin-step-loader__heading {
+  min-width: 0;
+}
+
+.admin-step-loader__title {
+  margin: 0;
+  color: #2a1670;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.admin-step-loader__subtitle {
+  margin: 2px 0 0;
+  color: #6b55c9;
+  font-size: 12px;
+}
+
+.admin-step-loader__count {
+  flex: none;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: #5b2bd6;
+  background: #ece5ff;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-step-loader__bar {
+  height: 4px;
+  overflow: hidden;
+  background: #efebfa;
+}
+
+.admin-step-loader__bar > span {
+  position: relative;
+  display: block;
+  height: 100%;
+  overflow: hidden;
+  background: linear-gradient(90deg, #8b5cf6, #6636e8);
+  transition: width 0.6s ease;
+}
+
+/* Light sweep across the filled part, so the bar looks busy between steps. */
+.admin-step-loader__bar > span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  transform: translateX(-100%);
+  animation: admin-step-loader-sweep 1.4s ease-in-out infinite;
+}
+
+/* Centred as a block (fit-content) so icons stay in one column for the connector line. */
+.admin-step-loader__list {
+  width: fit-content;
+  max-width: calc(100% - 40px);
+  margin: 0 auto;
+  padding: 14px 0 6px;
+  list-style: none;
+}
+
+.admin-step-loader__step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 13px;
+  transition: opacity 0.3s ease;
+}
+
+/* Connector from this icon down to the next one; purple once the step is done. */
+.admin-step-loader__step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: calc(50% + 12px);
+  left: 10px;
+  width: 2px;
+  height: calc(100% - 14px);
+  border-radius: 2px;
+  background: #ebe5fd;
+  transition: background 0.3s ease;
+}
+
+.admin-step-loader__step--done:not(:last-child)::after {
+  background: #b9a5f7;
+}
+
+.admin-step-loader__step--waiting {
+  opacity: 0.6;
+}
+
+.admin-step-loader__icon {
+  position: relative;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #d9cffb;
+  border-radius: 50%;
+  color: #ffffff;
+  background: #ffffff;
+}
+
+.admin-step-loader__step--done .admin-step-loader__icon {
+  border-color: #6636e8;
+  background: #6636e8;
+  animation: admin-step-loader-pop 0.3s ease-out;
+}
+
+.admin-step-loader__step--running .admin-step-loader__icon {
+  border-color: #e4defb;
+  border-top-color: #6636e8;
+  animation: page-loader-spin 0.8s linear infinite, admin-step-loader-glow 1.6s ease-out infinite;
+}
+
+.admin-step-loader__label {
+  overflow: hidden;
+  color: #4a2fb0;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-step-loader__step--waiting .admin-step-loader__label {
+  color: #8f7fd6;
+}
+
+.admin-step-loader__step--running .admin-step-loader__label {
+  color: #6636e8;
+  font-weight: 700;
+}
+
+.admin-step-loader__foot {
+  margin: 0;
+  padding: 10px 20px 18px;
+  color: #6b55c9;
+  font-size: 11.5px;
+  text-align: center;
+}
+
+@keyframes admin-step-loader-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes admin-step-loader-pop {
+  0% {
+    transform: scale(0.6);
+  }
+
+  70% {
+    transform: scale(1.12);
+  }
+}
+
+@keyframes admin-step-loader-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(102, 54, 232, 0.28);
+  }
+
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px rgba(102, 54, 232, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-step-loader__bar > span::after,
+  .admin-step-loader__step--done .admin-step-loader__icon {
+    animation: none;
+  }
+
+  .admin-step-loader__step--running .admin-step-loader__icon {
+    animation: page-loader-spin 2.4s linear infinite;
+  }
+}
+
+/* Participant actions popup: same spinner + fading status line as the admin loader. */
+.participant-loader__spinner {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 0;
+}
+
+.participant-loader__label {
+  animation: page-loader-message-in 0.3s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .participant-loader__label {
+    animation: none;
+  }
+}
+
 .page-loader--admin .page-loader__label {
   animation: page-loader-message-in 0.3s ease-out;
   color: var(--color-text-primary);
@@ -6846,11 +7085,11 @@ input[type="range"] {
 
 .rcpl-program-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr);
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 34px;
+  gap: 32px;
   overflow: hidden;
-  padding: 34px 32px;
+  padding: 24px 28px;
   border-radius: 18px;
   color: #fff;
   background: radial-gradient(760px 300px at 78% 0%, var(--rcpl-navy-700) 0%, transparent 62%), var(--rcpl-navy-900);
@@ -6876,11 +7115,185 @@ input[type="range"] {
 }
 
 .rcpl-program-copy>p {
-  max-width: 58ch;
-  margin: 13px 0 0;
+  max-width: 64ch;
+  margin: 8px 0 0;
+  overflow: hidden;
   color: rgba(255, 255, 255, .75);
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.5;
+  /* One line only: the full text is in the title tooltip. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Hero: vertical phase stepper ───────────────────────────── */
+.rcpl-hero-steps {
+  padding-left: 28px;
+  border-left: 1px solid rgba(255, 255, 255, .1);
+}
+
+.rcpl-vstepper {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rcpl-vstep {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 12px;
+  padding-bottom: 18px;
+  animation: rcpl-vstep-in .45s cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.rcpl-vstep:last-child {
+  padding-bottom: 0;
+}
+
+.rcpl-vstep-dot {
+  position: relative;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, .7);
+  background: rgba(255, 255, 255, .12);
+}
+
+.rcpl-vstep--done .rcpl-vstep-dot {
+  color: #fff;
+  background: #22c55e;
+}
+
+.rcpl-vstep--current .rcpl-vstep-dot {
+  color: var(--rcpl-navy-900);
+  background: var(--rcpl-gold);
+  animation: rcpl-vstep-pulse 2.2s ease-out infinite 1s;
+}
+
+/* Connector from this dot down to the next one; fills in for completed phases. */
+.rcpl-vstep-line {
+  position: absolute;
+  top: 30px;
+  bottom: 2px;
+  left: 13px;
+  width: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .16);
+}
+
+.rcpl-vstep-line>span {
+  display: none;
+  width: 100%;
+  height: 100%;
+  transform-origin: top;
+  background: #22c55e;
+  animation: rcpl-vstep-fill .6s ease-out both;
+}
+
+.rcpl-vstep--done .rcpl-vstep-line>span {
+  display: block;
+}
+
+.rcpl-vstep-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  padding-top: 2px;
+}
+
+.rcpl-vstep-copy>strong {
+  overflow: hidden;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rcpl-vstep-copy>small {
+  color: rgba(255, 255, 255, .55);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rcpl-vstep--current .rcpl-vstep-copy>strong {
+  color: var(--rcpl-gold-soft);
+}
+
+/* ── Hero: company logo circle (far right) ───────────────────── */
+.rcpl-hero-logo {
+  width: 132px;
+  height: 132px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .28);
+  animation: rcpl-hero-logo-in .6s cubic-bezier(.2, .8, .2, 1) both .2s;
+}
+
+.rcpl-hero-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.rcpl-hero-logo span {
+  color: var(--rcpl-navy-900);
+  font-size: 30px;
+  font-weight: 900;
+}
+
+@keyframes rcpl-vstep-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes rcpl-vstep-fill {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes rcpl-vstep-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(231, 185, 77, .55);
+  }
+
+  70%,
+  100% {
+    box-shadow: 0 0 0 9px rgba(231, 185, 77, 0);
+  }
+}
+
+@keyframes rcpl-hero-logo-in {
+  from {
+    opacity: 0;
+    transform: scale(.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .rcpl-vstep,
+  .rcpl-vstep-line>span,
+  .rcpl-vstep--current .rcpl-vstep-dot,
+  .rcpl-hero-logo {
+    animation: none;
+  }
 }
 
 .rcpl-hero-meta {
@@ -7014,8 +7427,11 @@ input[type="range"] {
 
 .rcpl-program-journey {
   min-width: 0;
+  width: 100%;
+  max-width: 340px;
+  justify-self: end;
   position: relative;
-  padding: 14px;
+  padding: 10px;
   border: 1px solid rgba(240, 220, 170, .16);
   border-radius: 13px;
   background: rgba(255, 255, 255, .05);
@@ -7039,6 +7455,8 @@ input[type="range"] {
   display: block;
   width: 100%;
   height: auto;
+  max-height: 180px;
+  margin: 0 auto;
 }
 
 .rcpl-program-journey .rcpl-arrow-track {
@@ -8554,13 +8972,30 @@ input[type="range"] {
 
 @media (max-width: 800px) {
   .rcpl-program-hero {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     padding: 26px 24px;
   }
 
+  /* Text on top; stepper and logo share the row below. */
+  .rcpl-program-copy {
+    grid-column: 1 / -1;
+  }
+
+  .rcpl-hero-steps {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .rcpl-hero-logo {
+    width: 96px;
+    height: 96px;
+    padding: 16px;
+  }
+
   .rcpl-program-journey {
-    max-width: 560px;
+    max-width: 420px;
     width: 100%;
+    justify-self: start;
   }
 
   .rcpl-agenda-days {
@@ -19545,6 +19980,10 @@ div.cp-person { cursor: default; }
   background: rgba(255, 255, 255, .07);
 }
 
+.participant-shell--earlier-batch .rcpl-hero-steps {
+  border-left-color: rgba(255, 255, 255, .14);
+}
+
 /* Earlier-batch sidebar tint — placed last so it beats the RCPL shell overrides above. */
 @media (min-width: 941px) {
   .participant-shell--sidebar.participant-shell--rcpl.participant-shell--earlier-batch .participant-sidebar {
@@ -20650,20 +21089,22 @@ button.surprise-tile:focus-visible,
   flex: none;
 }
 
+/* Live plan: light card with a gold edge, so it stands apart from the dark hero
+   above it and reads as the place to act. */
 .rcpl-plan-card--live {
   align-items: stretch;
-  border-color: var(--rcpl-navy-900);
-  color: #fff;
-  background: var(--rcpl-navy-900);
-  box-shadow: 0 2px 14px rgba(12, 31, 63, .12);
+  border-color: #ecd9a6;
+  color: var(--rcpl-ink);
+  background: linear-gradient(180deg, #fffdf6 0%, #fff 60%);
+  box-shadow: 0 0 0 4px rgba(231, 185, 77, .12), 0 2px 14px rgba(12, 31, 63, .07);
 }
 
 .rcpl-plan-card--live .rcpl-plan-card-copy > small {
-  color: var(--rcpl-gold);
+  color: var(--rcpl-gold-deep);
 }
 
 .rcpl-plan-card--live .rcpl-plan-card-copy h3 {
-  color: #fff;
+  color: var(--rcpl-ink);
 }
 
 .rcpl-plan-card-actions {
@@ -20680,10 +21121,10 @@ button.surprise-tile:focus-visible,
   align-items: center;
   gap: 12px;
   padding: 9px 10px 9px 14px;
-  border: 1px solid rgba(255, 255, 255, .14);
+  border: 1px solid #efe3c4;
   border-radius: 12px;
-  color: #fff;
-  background: rgba(255, 255, 255, .06);
+  color: var(--rcpl-ink);
+  background: var(--rcpl-cream);
   font-weight: 650;
 }
 
@@ -20726,7 +21167,7 @@ button.surprise-tile:focus-visible,
   flex: none;
   display: grid;
   place-items: center;
-  border: 2px solid rgba(255, 255, 255, .4);
+  border: 2px solid #d9c38c;
   border-radius: 50%;
   color: transparent;
 }
@@ -20736,7 +21177,7 @@ button.surprise-tile:focus-visible,
   align-items: center;
   gap: 18px;
   padding-left: 18px;
-  border-left: 1px solid rgba(255, 255, 255, .12);
+  border-left: 1px solid #efe3c4;
 }
 
 .rcpl-plan-card-ring {
@@ -20747,7 +21188,7 @@ button.surprise-tile:focus-visible,
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: conic-gradient(var(--rcpl-gold) calc(var(--p) * 1%), rgba(255, 255, 255, .12) 0);
+  background: conic-gradient(var(--rcpl-gold) calc(var(--p) * 1%), #f1e8d2 0);
 }
 
 .rcpl-plan-card-ring > div {
@@ -20757,7 +21198,8 @@ button.surprise-tile:focus-visible,
   place-content: center;
   border-radius: 50%;
   text-align: center;
-  background: var(--rcpl-navy-900);
+  color: var(--rcpl-ink);
+  background: #fff;
 }
 
 .rcpl-plan-card-ring strong {
@@ -20767,7 +21209,7 @@ button.surprise-tile:focus-visible,
 }
 
 .rcpl-plan-card-ring small {
-  color: rgba(255, 255, 255, .6);
+  color: var(--rcpl-muted);
   font-size: 11px;
 }
 
@@ -20778,7 +21220,7 @@ button.surprise-tile:focus-visible,
 }
 
 .rcpl-plan-card-meta span {
-  color: rgba(255, 255, 255, .6);
+  color: var(--rcpl-muted);
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: .1em;
@@ -20804,7 +21246,7 @@ button.surprise-tile:focus-visible,
   .rcpl-plan-card-side {
     padding: 14px 0 0;
     border-left: 0;
-    border-top: 1px solid rgba(255, 255, 255, .12);
+    border-top: 1px solid #efe3c4;
   }
 
   .rcpl-plan-card-meta {
@@ -22812,4 +23254,99 @@ a.unlocked-box-card:focus-visible {
 .plan-form-refine:disabled {
   opacity: .5;
   cursor: not-allowed;
+}
+
+/* Journey: announcements (60%) and batch conversation (40%) side by side in the
+   main column, under the pre-reads and videos. The row also carries
+   .rcpl-side-rail for the chat's rail styles, so these overrides sit last to
+   beat that rail's grid rules. */
+.rcpl-side-rail.rcpl-comms-row {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: stretch;
+  gap: 18px;
+}
+
+.rcpl-comms-row > .journey-module-card {
+  height: 100%;
+  margin: 0;
+}
+
+.rcpl-comms-row > .journey-chat-card {
+  grid-row: auto;
+}
+
+@media (max-width: 800px) {
+  .rcpl-side-rail.rcpl-comms-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Announcements card: heading, the facilitator as a full-width card, then the
+   notices taking every remaining pixel (instead of the grid spreading blank
+   space between rows when the card stretches to the chat's height). */
+.journey-trainer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.journey-notice-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.journey-notice-body > .journey-notice-list {
+  gap: 2px;
+}
+
+.journey-notice-body .journey-notice-item p {
+  font-size: 13.5px;
+}
+
+.journey-trainer-card .journey-notice-body > .journey-chat-state {
+  flex: 1;
+  min-height: 120px;
+}
+
+.journey-trainer-profile.journey-trainer-profile--footer {
+  gap: 8px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 10px;
+}
+
+.journey-trainer-profile--footer .journey-trainer-card-avatar {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+}
+
+/* Name and designation on one line: "Name · Master Facilitator". */
+.journey-trainer-profile--footer > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.journey-trainer-profile--footer strong {
+  display: inline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13.5px;
+  line-height: 1.2;
+}
+
+.journey-trainer-profile--footer small {
+  flex: none;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.journey-trainer-profile--footer small::before {
+  content: "· ";
 }

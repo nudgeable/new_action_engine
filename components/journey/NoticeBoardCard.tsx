@@ -29,18 +29,17 @@ export default function NoticeBoardCard({
     <article className={`journey-module-card journey-trainer-card${variant === "rcpl" ? " journey-trainer-card--rcpl" : ""}`}>
       <div className="journey-trainer-heading">
         <small>Announcements</small>
-        {/* <h3>From your trainer</h3>
-        <p>Updates, reminders and anything else your trainer wants this batch to know before the next session.</p> */}
       </div>
 
+      {/* Who posts these: a full-width facilitator card above the notices. */}
       {trainer && (
-        <div className="journey-trainer-profile">
-          <span className="journey-trainer-card-avatar">{trainer.imageUrl ? <img src={trainer.imageUrl} alt="" /> : <UserRound size={16} />}</span>
+        <div className="journey-trainer-profile journey-trainer-profile--footer">
+          <span className="journey-trainer-card-avatar">{trainer.imageUrl ? <img src={trainer.imageUrl} alt="" /> : <UserRound size={13} />}</span>
           <div><strong>{trainer.name}</strong><small>Master Facilitator</small></div>
         </div>
       )}
 
-      <div aria-live="polite" aria-label="Notices from your trainer">
+      <div className="journey-notice-body" aria-live="polite" aria-label="Notices from your trainer">
         {notices.length === 0 ? (
           <div className="journey-chat-state">
             <Megaphone size={22} />

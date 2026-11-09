@@ -270,6 +270,8 @@ export interface DashboardLeaderboardEntry {
   pendingValidationCount: number;
   /** Confirmed fails/skips — matches Actions "Didn't complete". */
   notCompletedCount: number;
+  /** WhatsApp number on file: "active", "opted_out" (replied STOP), or null when none. */
+  whatsapp: "active" | "opted_out" | null;
 }
 
 /** Map user_id → buddy display name for the given cohorts (joins unique names when a
@@ -343,11 +345,16 @@ export async function getDashboardLeaderboard(
     );
 
     const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
-    const [commitmentByCohort, buddyByUser, emailOpensByUser] = await Promise.all([
+    const [commitmentByCohort, buddyByUser, emailOpensByUser, whatsappResult] = await Promise.all([
       loadCommitmentWalletByCohort(admin, cohortIds),
       loadBuddyNamesByUser(admin, cohortIds, userIds),
       loadMemberEmailOpenCounts(admin, userIds, cohortIds),
+      admin.from("whatsapp_contacts").select("user_id, phone, opted_out_at").in("user_id", userIds),
     ]);
+    const whatsappByUser = new Map<string, "active" | "opted_out">();
+    for (const contact of (whatsappResult.data ?? []) as { user_id: string; phone: string | null; opted_out_at: string | null }[]) {
+      if (contact.phone?.trim()) whatsappByUser.set(contact.user_id, contact.opted_out_at ? "opted_out" : "active");
+    }
 
     const commitmentByUser = new Map<string, { points: number; maximum: number; plannedActions: number; missedActions: number }>();
     for (const { perUser } of commitmentByCohort.values()) {
@@ -415,6 +422,7 @@ export async function getDashboardLeaderboard(
         actionsReadCount: emailOpensByUser.get(id)?.eitherOpened ?? 0,
         pendingValidationCount: pendingByUser.get(id) ?? 0,
         notCompletedCount: notCompletedByUser.get(id) ?? 0,
+        whatsapp: whatsappByUser.get(id) ?? null,
       };
     });
     entries.sort((a, b) => b.commitmentPct - a.commitmentPct || b.commitmentPoints - a.commitmentPoints);
@@ -422,6 +430,54 @@ export async function getDashboardLeaderboard(
     return { entries };
   } catch (e) {
     return { entries: [], error: e instanceof Error ? e.message : "Failed" };
+  }
+}
+
+export interface ProgramProgress {
+  /** Current programme week (1-indexed), capped at the programme length. */
+  currentWeek: number;
+  /** Programme length in weeks (cohorts.max_weeks); null when not set. */
+  maxWeeks: number | null;
+  /** True once the programme length has been fully used up. */
+  ended: boolean;
+}
+
+/** Where the batch is in its programme, on the same week clock as the dashboard
+ * charts. Across several batches it reports the furthest-along one. */
+export async function getProgramProgress(
+  companyId?: string | null,
+  cohortId?: string | null
+): Promise<{ progress: ProgramProgress | null; error?: string }> {
+  try {
+    const { companyId: myCompanyId, role } = await getAdminContext();
+    const resolvedCompanyId = role === "admin" ? myCompanyId : companyId;
+    if (!resolvedCompanyId) return { progress: null, error: "Company required" };
+
+    const admin = createAdminClient();
+    const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
+    if (!cohortIds.length) return { progress: null };
+
+    const [anchors, maxWeeksByCohort] = await Promise.all([
+      resolveCohortWeekAnchors(admin, cohortIds),
+      resolveCohortMaxWeeks(admin, cohortIds),
+    ]);
+    if (!anchors.size) return { progress: null };
+
+    const now = new Date();
+    let best: ProgramProgress | null = null;
+    for (const [id, anchor] of anchors) {
+      const elapsed = weekNumberFor(now, anchor);
+      const maxWeeks = maxWeeksByCohort.get(id) ?? null;
+      const candidate: ProgramProgress = {
+        currentWeek: maxWeeks ? Math.min(elapsed, maxWeeks) : elapsed,
+        maxWeeks,
+        ended: maxWeeks !== null && elapsed > maxWeeks,
+      };
+      if (!best || candidate.currentWeek > best.currentWeek) best = candidate;
+    }
+    return { progress: best };
+  } catch (e) {
+    return { progress: null, error: e instanceof Error ? e.message : "Failed" };
   }
 }
 
@@ -442,7 +498,35 @@ export interface ParticipantActionRow {
   sentAt: string | null;
   completedAt: string | null;
   completedVia: "app" | "whatsapp" | null;
+  /** First time the participant opened a reminder email / read a WhatsApp reminder
+   * sent while this action was live; null if not seen (or no read receipt). */
+  seenAt: string | null;
+  seenVia: "email" | "whatsapp" | null;
+  /** True when seenAt comes from an older reminder that didn't record its actions,
+   * matched by send time instead of by the action itself. */
+  seenEstimated: boolean;
 }
+
+/** Reads reminder log rows with their action_ids, retrying without that column if
+ * migration 087 hasn't been applied yet, so the popup still loads (timing match only). */
+async function loadSeenReminderRows(
+  admin: ReturnType<typeof createAdminClient>,
+  table: "email_campaign_logs" | "whatsapp_message_logs",
+  columns: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  filter: (query: any) => any
+): Promise<Record<string, unknown>[]> {
+  const extra = table === "email_campaign_logs" ? ", template_id" : "";
+  const withIds = await filter(admin.from(table).select(`${columns}${extra}, action_ids`));
+  if (!withIds.error) return (withIds.data ?? []) as Record<string, unknown>[];
+  const withoutIds = await filter(admin.from(table).select(`${columns}${extra}`));
+  return (withoutIds.data ?? []) as Record<string, unknown>[];
+}
+
+/** Reminders don't record which actions they listed, so a reminder counts towards an
+ * action if it went out while that action was live: from delivery until completion,
+ * or for this long after delivery when it was never completed. */
+const SEEN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Same Current / Pending validation / Didn't complete split as the leaderboard's counts. */
 function participantActionStatus(
@@ -460,7 +544,7 @@ export async function getParticipantActionTimeline(
   userId: string,
   companyId?: string | null,
   cohortId?: string | null
-): Promise<{ rows: ParticipantActionRow[]; error?: string }> {
+): Promise<{ rows: ParticipantActionRow[]; whatsappPhone?: string | null; error?: string }> {
   try {
     const { companyId: myCompanyId, role } = await getAdminContext();
     const resolvedCompanyId = role === "admin" ? myCompanyId : companyId;
@@ -482,10 +566,18 @@ export async function getParticipantActionTimeline(
     const scopedUserIds = await resolveScopedUserIds(admin, resolvedCompanyId, cohortId ?? null);
     if (!scopedUserIds.includes(userId)) return { rows: [], error: "Participant not found" };
 
-    const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
-    if (!cohortIds.length) return { rows: [] };
+    // WhatsApp number on file (for the popup footer); null when none saved.
+    const { data: contact } = await admin
+      .from("whatsapp_contacts")
+      .select("phone")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const whatsappPhone = (contact as { phone: string | null } | null)?.phone?.trim() || null;
 
-    const [plansResult, walletActionsResult, userActionsResult] = await Promise.all([
+    const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
+    if (!cohortIds.length) return { rows: [], whatsappPhone };
+
+    const [plansResult, walletActionsResult, userActionsResult, emailRows, whatsappRows] = await Promise.all([
       admin.from("commitment_wallet_plans").select("id, finalised_at").eq("user_id", userId).in("cohort_id", cohortIds),
       admin.from("commitment_wallet_actions").select("action_id, plan_id").eq("user_id", userId).in("cohort_id", cohortIds),
       admin
@@ -493,9 +585,72 @@ export async function getParticipantActionTimeline(
         .select("action_id, status, auto_expired, scheduled_at, created_at, completed_at, completed_via")
         .eq("user_id", userId)
         .in("cohort_id", cohortIds),
+      loadSeenReminderRows(admin, "email_campaign_logs", "cohort_id, created_at, opened_at, clicked_at", (q) =>
+        q.eq("user_id", userId).in("template_id", ["daily_reminder", "weekly_recap"]).eq("status", "sent")
+      ),
+      loadSeenReminderRows(admin, "whatsapp_message_logs", "created_at, read_at", (q) =>
+        q.eq("user_id", userId).in("purpose", ["action_reminder", "action_reminder_manual"]).not("read_at", "is", null)
+      ),
     ]);
     const queryError = plansResult.error ?? walletActionsResult.error ?? userActionsResult.error;
-    if (queryError) return { rows: [], error: queryError.message };
+    if (queryError) return { rows: [], whatsappPhone, error: queryError.message };
+
+    // Every reminder this participant actually saw: when it went out, when it was
+    // first opened/read, and (for reminders sent since migration 087) which actions it listed.
+    type SeenReminder = { sentMs: number; seenAt: string; via: "email" | "whatsapp"; actionIds: string[] | null; recap: boolean };
+    const cohortIdSet = new Set(cohortIds);
+    const seenReminders: SeenReminder[] = [];
+    for (const row of emailRows as {
+      cohort_id: string | null;
+      template_id?: string;
+      created_at: string;
+      opened_at: string | null;
+      clicked_at: string | null;
+      action_ids?: string[] | null;
+    }[]) {
+      if (row.cohort_id && !cohortIdSet.has(row.cohort_id)) continue;
+      // A click implies an open (some clients block the open pixel).
+      const seenAt = row.opened_at ?? row.clicked_at;
+      if (!seenAt) continue;
+      seenReminders.push({
+        sentMs: Date.parse(row.created_at),
+        seenAt,
+        via: "email",
+        actionIds: row.action_ids ?? null,
+        recap: row.template_id === "weekly_recap",
+      });
+    }
+    for (const row of whatsappRows as { created_at: string; read_at: string; action_ids?: string[] | null }[]) {
+      seenReminders.push({
+        sentMs: Date.parse(row.created_at),
+        seenAt: row.read_at,
+        via: "whatsapp",
+        actionIds: row.action_ids ?? null,
+        recap: false,
+      });
+    }
+
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const firstSeen = (actionId: string, fromIso: string | null, untilIso: string | null) => {
+      let exact: SeenReminder | null = null;
+      let estimated: SeenReminder | null = null;
+      // Fallback window for older reminders: from IST midnight on the delivery day
+      // (the reminder's fixed send time can fall just before the stored delivery
+      // timestamp) until completion, or SEEN_WINDOW_MS after delivery.
+      const fromMs = fromIso ? Math.floor((Date.parse(fromIso) + IST_OFFSET_MS) / DAY_MS) * DAY_MS - IST_OFFSET_MS : null;
+      const untilMs = fromIso ? (untilIso ? Date.parse(untilIso) : Date.parse(fromIso) + SEEN_WINDOW_MS) : null;
+      const earlier = (a: SeenReminder | null, b: SeenReminder) => (!a || Date.parse(b.seenAt) < Date.parse(a.seenAt) ? b : a);
+      for (const r of seenReminders) {
+        if (r.actionIds) {
+          if (r.actionIds.includes(actionId)) exact = earlier(exact, r);
+        } else if (!r.recap && fromMs !== null && untilMs !== null && r.sentMs >= fromMs && r.sentMs <= untilMs) {
+          estimated = earlier(estimated, r);
+        }
+      }
+      const best = exact ?? estimated;
+      return best ? { seenAt: best.seenAt, via: best.via, estimated: !exact } : null;
+    };
 
     const finalisedAtByPlan = new Map(
       ((plansResult.data ?? []) as { id: string; finalised_at: string }[]).map((plan) => [plan.id, plan.finalised_at])
@@ -521,7 +676,7 @@ export async function getParticipantActionTimeline(
     );
 
     const actionIds = [...new Set([...plannedAtByAction.keys(), ...userActionByAction.keys()])];
-    if (!actionIds.length) return { rows: [] };
+    if (!actionIds.length) return { rows: [], whatsappPhone };
 
     const { data: actions, error: actionsError } = await admin
       .from("actions")
@@ -529,21 +684,26 @@ export async function getParticipantActionTimeline(
       .in("id", actionIds)
       .order("plan_order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
-    if (actionsError) return { rows: [], error: actionsError.message };
+    if (actionsError) return { rows: [], whatsappPhone, error: actionsError.message };
 
     const rows = ((actions ?? []) as { id: string; title: string }[]).map((action) => {
       const ua = userActionByAction.get(action.id);
+      const sentAt = ua ? ua.scheduled_at ?? ua.created_at : null;
+      const seen = firstSeen(action.id, sentAt, ua?.status === "success" ? ua.completed_at : null);
       return {
         id: action.id,
         title: action.title,
         status: participantActionStatus(ua),
         plannedAt: plannedAtByAction.get(action.id) ?? null,
-        sentAt: ua ? ua.scheduled_at ?? ua.created_at : null,
+        sentAt,
         completedAt: ua?.status === "success" ? ua.completed_at : null,
         completedVia: ua?.status === "success" ? ua.completed_via : null,
+        seenAt: seen?.seenAt ?? null,
+        seenVia: seen?.via ?? null,
+        seenEstimated: seen?.estimated ?? false,
       };
     });
-    return { rows };
+    return { rows, whatsappPhone };
   } catch (e) {
     return { rows: [], error: e instanceof Error ? e.message : "Failed to load actions" };
   }
@@ -699,6 +859,17 @@ export interface EmailOpenWeeklyEntry {
   recapOpenedUsers: number;
   /** Unique users who opened reminder and/or recap that week (union). */
   eitherMailOpenedUsers: number;
+  /** Reminder + Friday recap emails sent / opened that week (message-level). */
+  emailSent: number;
+  emailOpened: number;
+  emailOpenRate: number;
+  /** WhatsApp action reminders sent (not failed) / read that week (message-level). */
+  whatsappSent: number;
+  whatsappRead: number;
+  whatsappReadRate: number;
+  /** Validated actions that were sent that week (by scheduled_at), split by where they were marked done. */
+  completedViaWhatsapp: number;
+  completedViaApp: number;
   weekStartIst: string | null;
   weekEndIst: string | null;
 }
@@ -927,8 +1098,62 @@ export async function getEmailOpenRates(
       weeklyMap.set(week, bucket);
     }
 
+    // WhatsApp action reminders, bucketed into the same batch weeks. These logs carry
+    // no cohort, so attribute them like the legacy email rows: selected batch, else
+    // the recipient's profile batch.
+    const whatsappWeekMap = new Map<number, { sent: number; read: number }>();
+    if (scopedUserIds.length) {
+      const { data: waRows } = await admin
+        .from("whatsapp_message_logs")
+        .select("user_id, status, created_at, read_at")
+        .in("user_id", scopedUserIds)
+        .in("purpose", ["action_reminder", "action_reminder_manual"]);
+      for (const row of (waRows ?? []) as {
+        user_id: string;
+        status: string;
+        created_at: string;
+        read_at: string | null;
+      }[]) {
+        if (row.status === "failed") continue;
+        const attributedCohortId =
+          (cohortId && cohortIdSet.has(cohortId) ? cohortId : null) ?? profileCohortByUser.get(row.user_id) ?? null;
+        const anchor = attributedCohortId ? anchors.get(attributedCohortId) : undefined;
+        if (!anchor) continue;
+        const week = weekNumberFor(new Date(row.created_at), anchor);
+        const bucket = whatsappWeekMap.get(week) ?? { sent: 0, read: 0 };
+        bucket.sent += 1;
+        if (row.read_at || row.status === "read") bucket.read += 1;
+        whatsappWeekMap.set(week, bucket);
+      }
+    }
+
+    // Validated actions by the week they were SENT (scheduled_at, else created_at —
+    // the same "sent on" as the participant popup) and where they were marked done
+    // (app vs WhatsApp reply). Bucketing by send week keeps each row about the same
+    // reminders as its email open / WhatsApp read rates.
+    const completionWeekMap = new Map<number, { whatsapp: number; app: number }>();
+    const { data: completedRows } = await admin
+      .from("user_actions")
+      .select("cohort_id, scheduled_at, created_at, completed_via")
+      .in("cohort_id", cohortIds)
+      .eq("status", "success");
+    for (const row of (completedRows ?? []) as {
+      cohort_id: string;
+      scheduled_at: string | null;
+      created_at: string;
+      completed_via: "app" | "whatsapp" | null;
+    }[]) {
+      const anchor = anchors.get(row.cohort_id);
+      if (!anchor) continue;
+      const week = weekNumberFor(new Date(row.scheduled_at ?? row.created_at), anchor);
+      const bucket = completionWeekMap.get(week) ?? { whatsapp: 0, app: 0 };
+      if (row.completed_via === "whatsapp") bucket.whatsapp += 1;
+      else bucket.app += 1;
+      completionWeekMap.set(week, bucket);
+    }
+
     const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
-    const unionSize = (a: Set<string>, b: Set<string>) => {
+    const unionSize =(a: Set<string>, b: Set<string>) => {
       const either = new Set(a);
       for (const id of b) either.add(id);
       return either.size;
@@ -937,11 +1162,19 @@ export async function getEmailOpenRates(
     const displayAnchor = sharedWeekAnchor(anchors.values());
     // Same axis as the other dashboard charts, so a new week is visible even
     // before any reminder has gone out that week.
-    const maxWeek = chartWeekCount(anchors, await resolveCohortMaxWeeks(admin, cohortIds), weeklyMap.keys());
-    const weekly: EmailOpenWeeklyEntry[] = weeklyMap.size
+    const maxWeek = chartWeekCount(
+      anchors,
+      await resolveCohortMaxWeeks(admin, cohortIds),
+      [...weeklyMap.keys(), ...whatsappWeekMap.keys(), ...completionWeekMap.keys()]
+    );
+    const weekly: EmailOpenWeeklyEntry[] = weeklyMap.size || whatsappWeekMap.size || completionWeekMap.size
       ? Array.from({ length: maxWeek }, (_, i) => {
           const week = i + 1;
           const b = weeklyMap.get(week) ?? emptyWeek();
+          const wa = whatsappWeekMap.get(week) ?? { sent: 0, read: 0 };
+          const done = completionWeekMap.get(week) ?? { whatsapp: 0, app: 0 };
+          const emailSent = b.reminderSent + b.recapSent;
+          const emailOpened = b.reminderOpened + b.recapOpened;
           return {
             weekNumber: week,
             welcomeSent: b.welcomeSent,
@@ -965,6 +1198,14 @@ export async function getEmailOpenRates(
             reminderOpenedUsers: b.reminderOpenedUserIds.size,
             recapOpenedUsers: b.recapOpenedUserIds.size,
             eitherMailOpenedUsers: unionSize(b.reminderOpenedUserIds, b.recapOpenedUserIds),
+            emailSent,
+            emailOpened,
+            emailOpenRate: pct(emailOpened, emailSent),
+            whatsappSent: wa.sent,
+            whatsappRead: wa.read,
+            whatsappReadRate: pct(wa.read, wa.sent),
+            completedViaWhatsapp: done.whatsapp,
+            completedViaApp: done.app,
             ...weekRangeFields(week, displayAnchor),
           };
         })
