@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, CalendarDays, Check, FileText, Play, X } from "lucide-react";
+import { ArrowRight, CalendarDays, Check, FileText, Play, Target, User, X } from "lucide-react";
 import CohortChat from "@/components/journey/CohortChat";
 import NoticeBoardCard from "@/components/journey/NoticeBoardCard";
 import FacilitatorsCard from "@/components/journey/FacilitatorsCard";
@@ -22,8 +22,8 @@ import ActionPlanCard from "@/components/journey/ActionPlanCard";
 // (seeded by an admin/superadmin per batch, see CohortManagementView's
 // Agenda tab) plus its own hero copy. Surge/RCPL University's SURGE
 // curriculum is just seeded data in that same column now (migration
-// 070_cohort_program_phases.sql) — the only thing still special-cased for it
-// is the hand-drawn journey curve graphic below, via `showCurveGraphic`.
+// 070_cohort_program_phases.sql); every batch, Surge included, gets the same
+// vertical phase stepper in the hero.
 type PhaseBlock = ProgramBlock;
 type PhaseDay = ProgramDay;
 type RcplPhase = ProgramPhase;
@@ -78,21 +78,40 @@ function ResourcePreview({ item }: { item: PrepareContentItem }) {
   return item.type === "video" ? <Play size={30} fill="currentColor" /> : <FileText size={28} />;
 }
 
-/** Replaces the hand-plotted SURGE journey SVG for companies with seeded,
- * variable-length phase lists — a simple stepper generalises to any count
- * where the bespoke 3-point curve can't. */
-function PhaseJourneyGraphic({ phases, activePhaseId }: { phases: RcplPhase[]; activePhaseId?: string }) {
+/** Vertical programme stepper for the hero: phases before the batch's current
+ * one are done (tick), the current one is highlighted (target), later ones are
+ * upcoming. Steps rise in one after another and the connector fills up to the
+ * current phase. Works for any number of phases. */
+function PhaseJourneyGraphic({ phases, currentPhaseId }: { phases: RcplPhase[]; currentPhaseId?: string | null }) {
+  const foundIndex = phases.findIndex((item) => item.id === currentPhaseId);
+  const currentIndex = foundIndex >= 0 ? foundIndex : 0;
   return (
-    <ol className="rcpl-journey-steps" aria-label="Programme phases">
-      {phases.map((item, index) => (
-        <li key={item.id} className={item.id === activePhaseId ? "active" : undefined}>
-          <span className="rcpl-journey-step-dot">{index + 1}</span>
-          <span className="rcpl-journey-step-copy">
-            <strong>{item.label}</strong>
-            {item.window && <small>{item.window}</small>}
-          </span>
-        </li>
-      ))}
+    <ol className="rcpl-vstepper" aria-label="Programme phases">
+      {phases.map((item, index) => {
+        const state = index < currentIndex ? "done" : index === currentIndex ? "current" : "upcoming";
+        const Icon = state === "done" ? Check : state === "current" ? Target : User;
+        return (
+          <li
+            key={item.id}
+            className={`rcpl-vstep rcpl-vstep--${state}`}
+            style={{ animationDelay: `${index * 140}ms` }}
+            aria-current={state === "current" ? "step" : undefined}
+          >
+            <span className="rcpl-vstep-dot" aria-hidden="true">
+              <Icon size={14} strokeWidth={state === "upcoming" ? 2.2 : 2.8} />
+            </span>
+            {index < phases.length - 1 && (
+              <span className="rcpl-vstep-line" aria-hidden="true">
+                <span style={{ animationDelay: `${400 + index * 260}ms` }} />
+              </span>
+            )}
+            <span className="rcpl-vstep-copy">
+              <strong>{item.focus || item.label}</strong>
+              {item.window && <small>{item.window}</small>}
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
 }
@@ -114,9 +133,8 @@ type RcplWorkspaceProps = {
   /** This batch's program agenda (cohort.programPhases). Empty/omitted hides
    * the agenda section. */
   phases?: RcplPhase[];
-  /** Renders the hand-drawn 3-point SURGE journey curve instead of the
-   * generic step list — only meaningful when `phases` has exactly 3 entries
-   * (the curve's labels are fixed artwork, not derived from phase content). */
+  /** No longer used: the hero shows the vertical phase stepper for every batch.
+   * Kept so existing callers still type-check. */
   showCurveGraphic?: boolean;
   /** Hero copy overrides — all default to Surge's existing SURGE copy, so
    * passing none of these keeps Surge pixel-identical. */
@@ -140,14 +158,12 @@ export default function RcplWorkspace({
   notices,
   facilitators,
   phases = [],
-  showCurveGraphic = false,
   programEyebrow = "RCPL Accelerated Leadership Program",
   heroTitle = "Your 5-month SURGE leadership journey",
   heroDescription = "Build the capability to lead the future, lead yourself, and lead others through immersive learning, practical application, teachbacks, and continued action at work.",
 }: RcplWorkspaceProps) {
   const searchParams = useSearchParams();
   const hasPhases = phases.length > 0;
-  const isDefaultJourney = showCurveGraphic && phases.length === 3;
   const phaseId = searchParams.get("phase") ?? cohort.currentPhaseId ?? phases[0]?.id;
   const phase = phases.find((item) => item.id === phaseId) ?? phases[0] ?? null;
   const [buddyInfoOpen, setBuddyInfoOpen] = useState(false);
@@ -258,16 +274,11 @@ export default function RcplWorkspace({
 
   return (
     <div className="rcpl-workspace animate-in fade-in duration-700">
-      <header className="rcpl-page-heading">
-        <span>{cohort.companyLogoUrl ? <img src={cohort.companyLogoUrl} alt={`${cohort.companyName || "Company"} logo`} /> : initials(cohort.companyName ?? null)}</span>
-        {/* <div><h1 className="text-2xl font-bold">SURGE</h1></div> */}
-      </header>
-
       <section className="rcpl-program-hero">
         <div className="rcpl-program-copy">
           <small>{programEyebrow}</small>
           <h2>{heroTitle}</h2>
-          <p>{heroDescription}</p>
+          <p title={heroDescription}>{heroDescription}</p>
           <div className="rcpl-hero-meta">
             {/* Dates come only from the admin-set cohort dates; the agenda
                 carries no dates, just "Day 1", "Day 2", etc. */}
@@ -290,30 +301,17 @@ export default function RcplWorkspace({
             </nav>
           )}
         </div>
-        <div className="rcpl-program-journey" aria-label={isDefaultJourney ? "The SURGE journey rises through three phases across six months" : "Programme phases"}>
-          {cohort.logoUrl && <img className="rcpl-program-mark" src={cohort.logoUrl} alt={`${cohort.name} logo`} />}
-          {isDefaultJourney ? (
-            <svg viewBox="0 0 440 262" role="img" aria-hidden="true">
-              <defs>
-                <filter id="rcpl-white-dot-glow" x="-200%" y="-200%" width="500%" height="500%">
-                  <feGaussianBlur stdDeviation="4.5" result="blur" />
-                  <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-              </defs>
-              <path className="rcpl-arrow-track" d="M22 228 C 100 228, 100 172, 178 172 S 256 116, 334 116 L 390 78" />
-              <path className="rcpl-arrow-live" d="M22 228 C 100 228, 100 172, 178 172 S 256 116, 334 116 L 390 78" />
-              <path d="M386 66 L 416 62 L 401 92 Z" fill="#D03A2C" />
-              <circle className="rcpl-journey-spark" r="4.5" fill="#fff" filter="url(#rcpl-white-dot-glow)">
-                <animateMotion dur="5.5s" begin="1.9s" repeatCount="indefinite" path="M22 228 C 100 228, 100 172, 178 172 S 256 116, 334 116 L 390 78" />
-                <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.08;0.85;1" dur="5.5s" begin="1.9s" repeatCount="indefinite" />
-              </circle>
-              <g><circle cx="22" cy="228" r="9" /><text x="4" y="202">Leading Business</text><text x="4" y="216">&amp;   Leading Future</text><text className="month" x="4" y="252">MONTH 1</text></g>
-              <g><circle cx="178" cy="172" r="9" /><text x="152" y="148">Leading Self</text><text className="month" x="152" y="161">MONTH 3</text></g>
-              <g><circle cx="334" cy="116" r="9" /><text x="300" y="146">Leading Others</text><text className="month" x="300" y="133">MONTH 5</text></g>
-            </svg>
-          ) : hasPhases ? (
-            <PhaseJourneyGraphic phases={phases} activePhaseId={phase?.id} />
-          ) : null}
+        {hasPhases && (
+          <div className="rcpl-hero-steps">
+            <PhaseJourneyGraphic phases={phases} currentPhaseId={cohort.currentPhaseId} />
+          </div>
+        )}
+        <div className="rcpl-hero-logo" aria-hidden={!cohort.companyLogoUrl}>
+          {cohort.companyLogoUrl ? (
+            <img src={cohort.companyLogoUrl} alt={`${cohort.companyName || "Company"} logo`} />
+          ) : (
+            <span>{initials(cohort.companyName ?? null)}</span>
+          )}
         </div>
       </section>
 
@@ -373,7 +371,13 @@ export default function RcplWorkspace({
               })}
             </div>
           </section>
-          <NoticeBoardCard notices={notices} trainer={cohort.trainer ?? null} variant="rcpl" />
+          {/* Announcements (60%) beside the batch conversation (40%), right under
+              the pre-reads and videos. Also a .rcpl-side-rail so the chat keeps
+              its rail-scoped styles. */}
+          <div className="rcpl-side-rail rcpl-comms-row">
+            <NoticeBoardCard notices={notices} trainer={cohort.trainer ?? null} variant="rcpl" />
+            <CohortChat cohortId={cohort.id} variant="rcpl" />
+          </div>
         </main>
 
         <aside className="rcpl-side-rail">
@@ -440,8 +444,6 @@ export default function RcplWorkspace({
           </section>
 
           <FacilitatorsCard facilitators={facilitators} variant="rcpl" />
-          <CohortChat cohortId={cohort.id} variant="rcpl" />
-
         </aside>
       </div>
 
