@@ -270,6 +270,8 @@ export interface DashboardLeaderboardEntry {
   pendingValidationCount: number;
   /** Confirmed fails/skips — matches Actions "Didn't complete". */
   notCompletedCount: number;
+  /** WhatsApp number on file: "active", "opted_out" (replied STOP), or null when none. */
+  whatsapp: "active" | "opted_out" | null;
 }
 
 /** Map user_id → buddy display name for the given cohorts (joins unique names when a
@@ -343,11 +345,16 @@ export async function getDashboardLeaderboard(
     );
 
     const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
-    const [commitmentByCohort, buddyByUser, emailOpensByUser] = await Promise.all([
+    const [commitmentByCohort, buddyByUser, emailOpensByUser, whatsappResult] = await Promise.all([
       loadCommitmentWalletByCohort(admin, cohortIds),
       loadBuddyNamesByUser(admin, cohortIds, userIds),
       loadMemberEmailOpenCounts(admin, userIds, cohortIds),
+      admin.from("whatsapp_contacts").select("user_id, phone, opted_out_at").in("user_id", userIds),
     ]);
+    const whatsappByUser = new Map<string, "active" | "opted_out">();
+    for (const contact of (whatsappResult.data ?? []) as { user_id: string; phone: string | null; opted_out_at: string | null }[]) {
+      if (contact.phone?.trim()) whatsappByUser.set(contact.user_id, contact.opted_out_at ? "opted_out" : "active");
+    }
 
     const commitmentByUser = new Map<string, { points: number; maximum: number; plannedActions: number; missedActions: number }>();
     for (const { perUser } of commitmentByCohort.values()) {
@@ -415,6 +422,7 @@ export async function getDashboardLeaderboard(
         actionsReadCount: emailOpensByUser.get(id)?.eitherOpened ?? 0,
         pendingValidationCount: pendingByUser.get(id) ?? 0,
         notCompletedCount: notCompletedByUser.get(id) ?? 0,
+        whatsapp: whatsappByUser.get(id) ?? null,
       };
     });
     entries.sort((a, b) => b.commitmentPct - a.commitmentPct || b.commitmentPoints - a.commitmentPoints);
@@ -536,7 +544,7 @@ export async function getParticipantActionTimeline(
   userId: string,
   companyId?: string | null,
   cohortId?: string | null
-): Promise<{ rows: ParticipantActionRow[]; error?: string }> {
+): Promise<{ rows: ParticipantActionRow[]; whatsappPhone?: string | null; error?: string }> {
   try {
     const { companyId: myCompanyId, role } = await getAdminContext();
     const resolvedCompanyId = role === "admin" ? myCompanyId : companyId;
@@ -558,8 +566,16 @@ export async function getParticipantActionTimeline(
     const scopedUserIds = await resolveScopedUserIds(admin, resolvedCompanyId, cohortId ?? null);
     if (!scopedUserIds.includes(userId)) return { rows: [], error: "Participant not found" };
 
+    // WhatsApp number on file (for the popup footer); null when none saved.
+    const { data: contact } = await admin
+      .from("whatsapp_contacts")
+      .select("phone")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const whatsappPhone = (contact as { phone: string | null } | null)?.phone?.trim() || null;
+
     const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
-    if (!cohortIds.length) return { rows: [] };
+    if (!cohortIds.length) return { rows: [], whatsappPhone };
 
     const [plansResult, walletActionsResult, userActionsResult, emailRows, whatsappRows] = await Promise.all([
       admin.from("commitment_wallet_plans").select("id, finalised_at").eq("user_id", userId).in("cohort_id", cohortIds),
@@ -577,7 +593,7 @@ export async function getParticipantActionTimeline(
       ),
     ]);
     const queryError = plansResult.error ?? walletActionsResult.error ?? userActionsResult.error;
-    if (queryError) return { rows: [], error: queryError.message };
+    if (queryError) return { rows: [], whatsappPhone, error: queryError.message };
 
     // Every reminder this participant actually saw: when it went out, when it was
     // first opened/read, and (for reminders sent since migration 087) which actions it listed.
@@ -660,7 +676,7 @@ export async function getParticipantActionTimeline(
     );
 
     const actionIds = [...new Set([...plannedAtByAction.keys(), ...userActionByAction.keys()])];
-    if (!actionIds.length) return { rows: [] };
+    if (!actionIds.length) return { rows: [], whatsappPhone };
 
     const { data: actions, error: actionsError } = await admin
       .from("actions")
@@ -668,7 +684,7 @@ export async function getParticipantActionTimeline(
       .in("id", actionIds)
       .order("plan_order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
-    if (actionsError) return { rows: [], error: actionsError.message };
+    if (actionsError) return { rows: [], whatsappPhone, error: actionsError.message };
 
     const rows = ((actions ?? []) as { id: string; title: string }[]).map((action) => {
       const ua = userActionByAction.get(action.id);
@@ -687,7 +703,7 @@ export async function getParticipantActionTimeline(
         seenEstimated: seen?.estimated ?? false,
       };
     });
-    return { rows };
+    return { rows, whatsappPhone };
   } catch (e) {
     return { rows: [], error: e instanceof Error ? e.message : "Failed to load actions" };
   }
@@ -851,6 +867,9 @@ export interface EmailOpenWeeklyEntry {
   whatsappSent: number;
   whatsappRead: number;
   whatsappReadRate: number;
+  /** Validated actions that were sent that week (by scheduled_at), split by where they were marked done. */
+  completedViaWhatsapp: number;
+  completedViaApp: number;
   weekStartIst: string | null;
   weekEndIst: string | null;
 }
@@ -1108,6 +1127,31 @@ export async function getEmailOpenRates(
       }
     }
 
+    // Validated actions by the week they were SENT (scheduled_at, else created_at —
+    // the same "sent on" as the participant popup) and where they were marked done
+    // (app vs WhatsApp reply). Bucketing by send week keeps each row about the same
+    // reminders as its email open / WhatsApp read rates.
+    const completionWeekMap = new Map<number, { whatsapp: number; app: number }>();
+    const { data: completedRows } = await admin
+      .from("user_actions")
+      .select("cohort_id, scheduled_at, created_at, completed_via")
+      .in("cohort_id", cohortIds)
+      .eq("status", "success");
+    for (const row of (completedRows ?? []) as {
+      cohort_id: string;
+      scheduled_at: string | null;
+      created_at: string;
+      completed_via: "app" | "whatsapp" | null;
+    }[]) {
+      const anchor = anchors.get(row.cohort_id);
+      if (!anchor) continue;
+      const week = weekNumberFor(new Date(row.scheduled_at ?? row.created_at), anchor);
+      const bucket = completionWeekMap.get(week) ?? { whatsapp: 0, app: 0 };
+      if (row.completed_via === "whatsapp") bucket.whatsapp += 1;
+      else bucket.app += 1;
+      completionWeekMap.set(week, bucket);
+    }
+
     const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
     const unionSize =(a: Set<string>, b: Set<string>) => {
       const either = new Set(a);
@@ -1121,13 +1165,14 @@ export async function getEmailOpenRates(
     const maxWeek = chartWeekCount(
       anchors,
       await resolveCohortMaxWeeks(admin, cohortIds),
-      [...weeklyMap.keys(), ...whatsappWeekMap.keys()]
+      [...weeklyMap.keys(), ...whatsappWeekMap.keys(), ...completionWeekMap.keys()]
     );
-    const weekly: EmailOpenWeeklyEntry[] = weeklyMap.size || whatsappWeekMap.size
+    const weekly: EmailOpenWeeklyEntry[] = weeklyMap.size || whatsappWeekMap.size || completionWeekMap.size
       ? Array.from({ length: maxWeek }, (_, i) => {
           const week = i + 1;
           const b = weeklyMap.get(week) ?? emptyWeek();
           const wa = whatsappWeekMap.get(week) ?? { sent: 0, read: 0 };
+          const done = completionWeekMap.get(week) ?? { whatsapp: 0, app: 0 };
           const emailSent = b.reminderSent + b.recapSent;
           const emailOpened = b.reminderOpened + b.recapOpened;
           return {
@@ -1159,6 +1204,8 @@ export async function getEmailOpenRates(
             whatsappSent: wa.sent,
             whatsappRead: wa.read,
             whatsappReadRate: pct(wa.read, wa.sent),
+            completedViaWhatsapp: done.whatsapp,
+            completedViaApp: done.app,
             ...weekRangeFields(week, displayAnchor),
           };
         })

@@ -4,7 +4,7 @@ import React, { createContext, useContext, useMemo, useState, useEffect, useCall
 import { createPortal } from "react-dom";
 import { Building2 } from "lucide-react";
 import { BatchModuleSelects, BatchSelector, useBatchOptions } from "@/components/admin/BatchSelector";
-import PageLoader from "@/components/PageLoader";
+import AdminStepLoader from "@/components/admin/AdminStepLoader";
 
 const COMPANY_STORAGE_KEY = "nudgeable:admin:companyId";
 const COHORT_STORAGE_KEY = "nudgeable:admin:cohortId";
@@ -17,12 +17,18 @@ const CONFIRMED_STORAGE_KEY = "nudgeable:admin:batchConfirmed";
 // Who confirmed the remembered batch. A remembered batch only counts for that
 // same user, so anyone else signing in on this tab still gets the pop-out.
 const OWNER_STORAGE_KEY = "nudgeable:admin:batchOwner";
-const BATCH_LOADING_MESSAGES = [
-  "Filtering records for your selection…",
-  "Checking data…",
-  "Sorting data…",
-  "Generating charts…",
-  "Almost ready…",
+// General "working on it" checklist shown while a batch's dashboard loads.
+// Purely for engagement: steps tick off on loose, randomised timers and the
+// last one keeps running until the data is really ready.
+const BATCH_LOADING_STEPS = [
+  "Reading batch records",
+  "Finding participants",
+  "Searching activity",
+  "Checking data",
+  "Sorting results",
+  "Calculating stats",
+  "Generating charts",
+  "Almost ready",
 ] as const;
 
 /** Clears the remembered company/batch selection so the next login always
@@ -323,10 +329,7 @@ export function BatchPickerGate({ children }: { children: React.ReactNode }) {
             the loading screen below until it reports itself ready. */}
         {children}
         {role !== "superadmin" && !viewReady && (
-          <PageLoader
-            variant="admin"
-            messages={BATCH_LOADING_MESSAGES}
-          />
+          <AdminStepLoader steps={BATCH_LOADING_STEPS} />
         )}
       </>
     );

@@ -44,6 +44,12 @@ function SeenCell({ row }: { row: ParticipantActionRow }) {
   );
 }
 
+/** Stored numbers are digits with country code (e.g. 919876543210); show them with a leading +. */
+function formatPhone(phone: string) {
+  const trimmed = phone.trim();
+  return /^\d+$/.test(trimmed) ? `+${trimmed}` : trimmed;
+}
+
 function DateCell({ value }: { value: string | null }) {
   if (!value) return <span style={{ color: "var(--color-text-muted)" }}>—</span>;
   const date = new Date(value);
@@ -149,6 +155,7 @@ interface ParticipantActionsModalProps {
 /** One participant's planned actions with when each was planned, sent and completed, and where. */
 export function ParticipantActionsModal({ userId, name, email, companyId, cohortId, onClose }: ParticipantActionsModalProps) {
   const [rows, setRows] = useState<ParticipantActionRow[] | null>(null);
+  const [whatsappPhone, setWhatsappPhone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -158,7 +165,10 @@ export function ParticipantActionsModal({ userId, name, email, companyId, cohort
       .then((result) => {
         if (stale) return;
         if (result.error) setError(result.error);
-        else setRows(result.rows);
+        else {
+          setRows(result.rows);
+          setWhatsappPhone(result.whatsappPhone ?? null);
+        }
       })
       .catch(() => {
         if (!stale) setError("Couldn't load this participant's actions");
@@ -298,6 +308,12 @@ export function ParticipantActionsModal({ userId, name, email, companyId, cohort
                     </span>
                   </>
                 )}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                WhatsApp:{" "}
+                <span className="font-semibold" style={{ color: whatsappPhone ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
+                  {whatsappPhone ? formatPhone(whatsappPhone) : "NA"}
+                </span>
               </span>
               <span>All times in IST</span>
             </div>
