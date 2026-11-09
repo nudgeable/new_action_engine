@@ -313,8 +313,8 @@ export function DashboardView({ companyId }: DashboardViewProps) {
   // Participant activity split, among members who made a plan only (same
   // commitmentMaximum > 0 signal as "Activated action plan" and the
   // leaderboard's "No plan" tag), from validated vs. sent actions:
-  // inactive = nothing validated; highly active = more than half of sent actions
-  // validated; partly active = everyone in between (above 0%, up to 50%).
+  // inactive = nothing validated; highly active = half or more of sent actions
+  // validated (50% counts); sometimes active = everyone in between (above 0%, under 50%).
   const planMakers = leaderboard.filter((u) => u.commitmentMaximum > 0);
   const activityChartData = (() => {
     let inactive = 0;
@@ -322,13 +322,13 @@ export function DashboardView({ companyId }: DashboardViewProps) {
     let highly = 0;
     for (const u of planMakers) {
       if (u.validatedCount === 0) inactive++;
-      else if (u.actionsSentCount > 0 && u.validatedCount / u.actionsSentCount > 0.5) highly++;
+      else if (u.actionsSentCount > 0 && u.validatedCount / u.actionsSentCount >= 0.5) highly++;
       else somewhat++;
     }
     return [
       { key: "inactive", name: "Inactive", hint: "0 actions validated", Users: inactive, color: ACTIVITY_COLORS.inactive },
-      { key: "somewhat", name: "Partly active", hint: "Up to half validated", Users: somewhat, color: ACTIVITY_COLORS.somewhat },
-      { key: "highly", name: "Highly active", hint: "Over half validated", Users: highly, color: ACTIVITY_COLORS.highly },
+      { key: "somewhat", name: "Sometimes active", hint: "Under half validated", Users: somewhat, color: ACTIVITY_COLORS.somewhat },
+      { key: "highly", name: "Highly active", hint: "Half or more validated", Users: highly, color: ACTIVITY_COLORS.highly },
     ];
   })();
   const activityTotal = planMakers.length;
@@ -441,7 +441,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
             note={
               leaderboardLoading
                 ? "…"
-                : "Completed more than half of received actions"
+                : "Completed half or more of received actions"
             }
             icon={TrendingUp}
             tint="#EDE9FE"
