@@ -235,7 +235,7 @@ export function NudgeParticipantModal({ participantId, name, email, companyId, o
                 style={{ background: NUDGE_YELLOW, color: NUDGE_INK, boxShadow: "0 4px 20px rgba(245, 197, 24, 0.35)" }}
               >
                 <Send size={15} />
-                {sending ? "Sending…" : "Send nudge"}
+                {sending ? "Sending…" : "Send mail"}
               </button>
             </div>
           </>

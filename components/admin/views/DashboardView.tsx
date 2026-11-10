@@ -14,7 +14,7 @@ import {
   PieChart,
   Pie,
 } from "recharts";
-import { ArrowDown, ArrowUp, BellRing, CalendarRange, CircleCheck, ListChecks, Target, TrendingUp } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarRange, CircleCheck, ListChecks, Mail, Target, TrendingUp } from "lucide-react";
 import { useAdminContext } from "@/components/admin/AdminContext";
 import { useBatchOptions } from "@/components/admin/BatchSelector";
 import { ParticipantActionsModal } from "@/components/admin/ParticipantActionsModal";
@@ -579,7 +579,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                   <tr>
                     <th
                       className="sticky left-0 z-20 px-5 py-3 text-xs font-semibold"
-                      style={{ ...headCellStyle, width: "20%", background: TABLE_HEAD_BG, boxShadow: FROZEN_COLUMN_EDGE }}
+                      style={{ ...headCellStyle, width: "22%", background: TABLE_HEAD_BG, boxShadow: FROZEN_COLUMN_EDGE }}
                     >
                       Rank / Name
                     </th>
@@ -595,7 +595,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                     <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Commitment score</th>
                     <th
                       className="sm:sticky sm:right-0 z-20 px-2 py-3 text-xs font-semibold text-center"
-                      style={{ ...headCellStyle, width: "12.6%", background: TABLE_HEAD_BG, boxShadow: FROZEN_RIGHT_COLUMN_EDGE }}
+                      style={{ ...headCellStyle, width: "10.6%", background: TABLE_HEAD_BG, boxShadow: FROZEN_RIGHT_COLUMN_EDGE }}
                     >
                       Actions
                     </th>
@@ -609,9 +609,20 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                           <span className="text-xs font-medium w-6 flex-shrink-0" style={{ color: "var(--color-text-muted)" }}>#{index + 1}</span>
                           <div className="min-w-0">
                             <span className="text-xs font-semibold block break-words" style={{ color: "var(--color-text-primary)" }}>{user.name}</span>
-                            <span className="text-xs block break-all" style={{ color: "var(--color-text-muted)" }}>
-                              {user.email ?? "—"}
-                            </span>
+                            {user.email ? (
+                              <button
+                                type="button"
+                                onClick={() => setNudgingParticipant(user)}
+                                title={`Nudge: email ${user.email}`}
+                                aria-label={`Nudge ${user.name} by email at ${user.email}`}
+                                className="text-xs block break-all text-left hover:underline"
+                                style={{ color: "var(--color-text-muted)" }}
+                              >
+                                {user.email}
+                              </button>
+                            ) : (
+                              <span className="text-xs block" style={{ color: "var(--color-text-muted)" }}>—</span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -661,24 +672,23 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => setNudgingParticipant(user)}
-                            aria-label={`Nudge ${user.name} by email`}
-                            title={user.email ? `Email a nudge to ${user.email}` : "No email address"}
-                            disabled={!user.email}
-                            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold whitespace-nowrap hover:brightness-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                            style={{ background: NUDGE_YELLOW, color: NUDGE_INK, border: `1px solid ${NUDGE_INK}` }}
-                          >
-                            <BellRing size={12} />
-                            Nudge
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => setViewingParticipant(user)}
                             aria-label={`View more about ${user.name}`}
                             className="rounded-lg px-2.5 py-1 text-xs font-semibold whitespace-nowrap hover:bg-violet-50"
                             style={{ color: CHART_PRIMARY, border: "1px solid #CFC5F7" }}
                           >
                             View more
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNudgingParticipant(user)}
+                            aria-label={`Nudge ${user.name} by email`}
+                            title={user.email ? `Nudge: email ${user.email}` : "Nudge: no email address"}
+                            disabled={!user.email}
+                            className="inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0 hover:brightness-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                            style={{ background: NUDGE_YELLOW, color: NUDGE_INK, border: `1px solid ${NUDGE_INK}` }}
+                          >
+                            <Mail size={13} strokeWidth={2.5} />
                           </button>
                         </div>
                       </td>
