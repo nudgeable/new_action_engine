@@ -33,9 +33,11 @@ interface NudgeParticipantModalProps {
   email: string | null;
   companyId: string | null;
   onClose: () => void;
+  /** Called once the email has gone out, e.g. to bump the leaderboard's nudge count. */
+  onSent?: () => void;
 }
 
-export function NudgeParticipantModal({ participantId, name, email, companyId, onClose }: NudgeParticipantModalProps) {
+export function NudgeParticipantModal({ participantId, name, email, companyId, onClose, onSent }: NudgeParticipantModalProps) {
   const [sender, setSender] = useState<NudgeSender | null>(null);
   const [senderError, setSenderError] = useState<string | null>(null);
   const [subject, setSubject] = useState(DEFAULT_SUBJECT);
@@ -88,8 +90,12 @@ export function NudgeParticipantModal({ participantId, name, email, companyId, o
     setSendError(null);
     const { success, error } = await sendParticipantNudge({ companyId, participantId, subject, message });
     setSending(false);
-    if (success) setSent(true);
-    else setSendError(error ?? "Couldn't send the nudge");
+    if (success) {
+      setSent(true);
+      onSent?.();
+    } else {
+      setSendError(error ?? "Couldn't send the nudge");
+    }
   };
 
   const fieldLabel = "block text-xs font-semibold mb-1.5";

@@ -200,6 +200,9 @@ export function DashboardView({ companyId }: DashboardViewProps) {
   const closeParticipantModal = useCallback(() => setViewingParticipant(null), []);
   const [nudgingParticipant, setNudgingParticipant] = useState<DashboardLeaderboardEntry | null>(null);
   const closeNudgeModal = useCallback(() => setNudgingParticipant(null), []);
+  const recordNudgeSent = useCallback((userId: string) => {
+    setLeaderboard((rows) => rows.map((row) => (row.id === userId ? { ...row, nudgeCount: row.nudgeCount + 1 } : row)));
+  }, []);
   const [weeklyTrend, setWeeklyTrend] = useState<CommitmentWeeklyTrendEntry[]>([]);
   const [weeklyTrendDelta, setWeeklyTrendDelta] = useState<number | null>(null);
   const [weeklyTrendLoading, setWeeklyTrendLoading] = useState(true);
@@ -579,20 +582,20 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                   <tr>
                     <th
                       className="sticky left-0 z-20 px-5 py-3 text-xs font-semibold"
-                      style={{ ...headCellStyle, width: "22%", background: TABLE_HEAD_BG, boxShadow: FROZEN_COLUMN_EDGE }}
+                      style={{ ...headCellStyle, width: "20.5%", background: TABLE_HEAD_BG, boxShadow: FROZEN_COLUMN_EDGE }}
                     >
                       Rank / Name
                     </th>
                     <th className="px-1 py-3" style={{ ...headCellStyle, width: "3%" }}><span className="sr-only">WhatsApp</span></th>
-                    <th className="px-2 py-3 text-xs font-semibold" style={{ ...headCellStyle, width: "13%" }}>Buddy</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Either mail opened</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Commitment score</th>
                     <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Planned actions</th>
                     <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Actions sent</th>
                     <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Validated actions</th>
                     <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Current actions left</th>
                     <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Didn&apos;t complete</th>
                     <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Pending validation</th>
-                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "8%" }}>Commitment score</th>
+                    <th className="px-2 py-3 text-xs font-semibold text-center" style={{ ...headCellStyle, width: "6.2%" }}>Either mail opened</th>
+                    <th className="px-2 py-3 text-xs font-semibold" style={{ ...headCellStyle, width: "14.5%" }}>Buddy</th>
                     <th
                       className="sm:sticky sm:right-0 z-20 px-2 py-3 text-xs font-semibold text-center"
                       style={{ ...headCellStyle, width: "10.6%", background: TABLE_HEAD_BG, boxShadow: FROZEN_RIGHT_COLUMN_EDGE }}
@@ -608,7 +611,20 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                         <div className="flex items-center gap-3 min-w-0">
                           <span className="text-xs font-medium w-6 flex-shrink-0" style={{ color: "var(--color-text-muted)" }}>#{index + 1}</span>
                           <div className="min-w-0">
-                            <span className="text-xs font-semibold block break-words" style={{ color: "var(--color-text-primary)" }}>{user.name}</span>
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs font-semibold break-words" style={{ color: "var(--color-text-primary)" }}>{user.name}</span>
+                              {user.nudgeCount > 0 && (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[10px] font-extrabold leading-4 whitespace-nowrap"
+                                  style={{ background: NUDGE_YELLOW, color: NUDGE_INK, border: `1px solid ${NUDGE_INK}` }}
+                                  title={`Nudged ${user.nudgeCount} ${user.nudgeCount === 1 ? "time" : "times"} by email`}
+                                  aria-label={`Nudged ${user.nudgeCount} ${user.nudgeCount === 1 ? "time" : "times"}`}
+                                >
+                                  <Mail size={10} strokeWidth={2.5} />
+                                  {user.nudgeCount}
+                                </span>
+                              )}
+                            </span>
                             {user.email ? (
                               <button
                                 type="button"
@@ -640,12 +656,11 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                           <span className="sr-only">No WhatsApp number</span>
                         )}
                       </td>
-                      <td className="px-2 py-2.5">
-                        <span className="text-xs font-medium block break-words" style={{ color: "var(--color-text-secondary)" }}>
-                          {user.buddyName ?? "—"}
+                      <td className="px-2 py-2.5 text-center">
+                        <span className="text-xs font-bold" style={{ color: "var(--color-text-primary)" }}>
+                          {user.commitmentMaximum > 0 ? `${user.commitmentPct}%` : "No plan"}
                         </span>
                       </td>
-                      <td className="px-2 py-2.5 text-center font-semibold" style={countCellStyle(user.actionsReadCount)}>{user.actionsReadCount}</td>
                       <td className="px-2 py-2.5 text-center font-semibold" style={countCellStyle(user.plannedActions)}>{user.plannedActions}</td>
                       <td className="px-2 py-2.5 text-center font-semibold" style={countCellStyle(user.actionsSentCount)}>{user.actionsSentCount}</td>
                       <td className="px-2 py-2.5 text-center">
@@ -663,9 +678,10 @@ export function DashboardView({ companyId }: DashboardViewProps) {
                       <td className="px-2 py-2.5 text-center font-semibold" style={countCellStyle(user.currentCount)}>{user.currentCount}</td>
                       <td className="px-2 py-2.5 text-center font-semibold" style={countCellStyle(user.notCompletedCount)}>{user.notCompletedCount}</td>
                       <td className="px-2 py-2.5 text-center font-semibold" style={countCellStyle(user.pendingValidationCount)}>{user.pendingValidationCount}</td>
-                      <td className="px-2 py-2.5 text-center">
-                        <span className="text-xs font-bold" style={{ color: "var(--color-text-primary)" }}>
-                          {user.commitmentMaximum > 0 ? `${user.commitmentPct}%` : "No plan"}
+                      <td className="px-2 py-2.5 text-center font-semibold" style={countCellStyle(user.actionsReadCount)}>{user.actionsReadCount}</td>
+                      <td className="px-2 py-2.5">
+                        <span className="text-xs font-medium block break-words" style={{ color: "var(--color-text-secondary)" }}>
+                          {user.buddyName ?? "—"}
                         </span>
                       </td>
                       <td className="sm:sticky sm:right-0 z-[5] bg-white px-2 py-2.5 text-center" style={{ boxShadow: FROZEN_RIGHT_COLUMN_EDGE }}>
@@ -718,6 +734,7 @@ export function DashboardView({ companyId }: DashboardViewProps) {
             email={nudgingParticipant.email}
             companyId={companyId}
             onClose={closeNudgeModal}
+            onSent={() => recordNudgeSent(nudgingParticipant.id)}
           />
         )}
 
