@@ -17,6 +17,8 @@ export interface ActionCard {
   planPoints?: number;
   /** Public URL of the closest-matching action-image library illustration, or null/undefined if none was matched. */
   imageUrl?: string | null;
+  /** One of the batch's action categories (Cohort.actionCategories), or null when uncategorised. */
+  category?: string | null;
 }
 
 export interface UserAction {
@@ -143,6 +145,10 @@ export interface Cohort {
   /** Superadmin-set subject overrides for this batch's recurring emails
    * (lib/batch-email-subjects.ts). Missing keys use the default subject. */
   emailSubjects?: Partial<Record<"daily_reminder" | "weekly_recap", string>>;
+  /** Superadmin-set categories (max 5) the AI assigns to this batch's
+   * generated actions and participants pick from when editing one. Empty
+   * means actions are not categorised (lib/action-categories.ts). */
+  actionCategories?: string[];
 }
 
 /** One row backing Cohort.dates, with the id needed to remove it individually

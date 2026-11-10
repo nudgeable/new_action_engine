@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { Cohort, CohortDate, CohortMember, CohortOption, CompanyBrand, ProgramPhase, Trainer } from "@/lib/types";
 import { parseProgramPhasesJson } from "@/lib/program-phases";
 import { parseBatchEmailSubjects, sanitizeBatchEmailSubjects } from "@/lib/batch-email-subjects";
+import { parseActionCategories, sanitizeActionCategories } from "@/lib/action-categories";
 
 const COHORT_LOGOS_BUCKET = "cohort-logos";
 
@@ -238,6 +239,10 @@ export async function updateCohort(
      * Replaces the stored set; blank entries fall back to the default.
      * Superadmin only. */
     emailSubjects?: Record<string, string | null | undefined>;
+    /** Categories the AI tags this batch's generated actions with (max 5).
+     * Replaces the stored list; an empty list turns categories off.
+     * Superadmin only. */
+    actionCategories?: string[];
   }
 ): Promise<{ error?: string }> {
   try {
@@ -254,6 +259,9 @@ export async function updateCohort(
       }
       if (params.emailSubjects !== undefined) {
         return { error: "Only a superadmin can change this batch's email subjects" };
+      }
+      if (params.actionCategories !== undefined) {
+        return { error: "Only a superadmin can change this batch's action categories" };
       }
     }
 
@@ -290,9 +298,17 @@ export async function updateCohort(
       if (subjectsError) return { error: subjectsError };
       updates.email_subjects = subjects;
     }
+    if (params.actionCategories !== undefined) {
+      const { categories, error: categoriesError } = sanitizeActionCategories(params.actionCategories);
+      if (categoriesError) return { error: categoriesError };
+      updates.action_categories = categories;
+    }
 
     const { error } = await supabase.from("cohorts").update(updates).eq("id", id);
     if (error) return { error: error.message };
+    // Participants read categories from the cached my-cohorts lookup (for the
+    // edit popup's dropdown) — drop it so they see the new list right away.
+    if (params.actionCategories !== undefined) updateTag("my-cohorts");
     revalidatePath("/admin");
     revalidatePath("/journey");
     return {};
@@ -503,7 +519,7 @@ export async function listCohorts(companyId: string): Promise<{
       supabase.from("companies").select("id, name, logo_url").eq("id", companyId).single(),
       supabase
         .from("cohorts")
-        .select("id, name, batch_name, module_name, description, training_content, business_context, logo_url, trainer_id, sender_name, email_subjects, locked, program_phases, current_phase_id, max_weeks")
+        .select("id, name, batch_name, module_name, description, training_content, business_context, logo_url, trainer_id, sender_name, email_subjects, action_categories, locked, program_phases, current_phase_id, max_weeks")
         .eq("company_id", companyId)
         .is("archived_at", null)
         .order("created_at", { ascending: false }),
@@ -530,7 +546,7 @@ export async function listCohorts(companyId: string): Promise<{
 
     return {
       company: companyBrand,
-      cohorts: cohorts.map((c: { id: string; name: string; batch_name: string; module_name: string | null; description: string | null; training_content: string | null; business_context: string | null; logo_url: string | null; trainer_id: string | null; sender_name: string | null; email_subjects: unknown; locked: boolean; program_phases: ProgramPhase[]; current_phase_id: string | null; max_weeks: number | null }) => ({
+      cohorts: cohorts.map((c: { id: string; name: string; batch_name: string; module_name: string | null; description: string | null; training_content: string | null; business_context: string | null; logo_url: string | null; trainer_id: string | null; sender_name: string | null; email_subjects: unknown; action_categories: unknown; locked: boolean; program_phases: ProgramPhase[]; current_phase_id: string | null; max_weeks: number | null }) => ({
         id: c.id,
         name: c.name,
         batchName: c.batch_name,
@@ -546,6 +562,7 @@ export async function listCohorts(companyId: string): Promise<{
         trainer: c.trainer_id ? trainerMap.get(c.trainer_id) ?? null : null,
         senderName: c.sender_name,
         emailSubjects: parseBatchEmailSubjects(c.email_subjects),
+        actionCategories: parseActionCategories(c.action_categories),
         locked: c.locked,
         programPhases: c.program_phases ?? [],
         currentPhaseId: c.current_phase_id,
@@ -567,7 +584,7 @@ export async function getCohortDetail(cohortId: string): Promise<{
 
     const { data: cohort } = await supabase
       .from("cohorts")
-      .select("id, name, batch_name, module_name, description, training_content, business_context, logo_url, company_id, trainer_id, sender_name, email_subjects, locked, program_phases, current_phase_id, max_weeks")
+      .select("id, name, batch_name, module_name, description, training_content, business_context, logo_url, company_id, trainer_id, sender_name, email_subjects, action_categories, locked, program_phases, current_phase_id, max_weeks")
       .eq("id", cohortId)
       .single();
     if (!cohort) return { error: "Batch not found" };
@@ -602,6 +619,7 @@ export async function getCohortDetail(cohortId: string): Promise<{
         trainer: cohort.trainer_id ? trainerMap.get(cohort.trainer_id) ?? null : null,
         senderName: cohort.sender_name,
         emailSubjects: parseBatchEmailSubjects(cohort.email_subjects),
+        actionCategories: parseActionCategories(cohort.action_categories),
         locked: cohort.locked,
         programPhases: cohort.program_phases ?? [],
         currentPhaseId: cohort.current_phase_id,
@@ -791,7 +809,7 @@ const computeMyCohorts = unstable_cache(
     const [{ data: cohortRows }, { data: memberRows }] = await Promise.all([
       admin
         .from("cohorts")
-        .select("id, name, batch_name, module_name, description, logo_url, company_id, archived_at, trainer_id, locked, program_phases, current_phase_id, max_weeks")
+        .select("id, name, batch_name, module_name, description, logo_url, company_id, archived_at, trainer_id, locked, program_phases, current_phase_id, max_weeks, action_categories")
         .in("id", orderedIds),
       admin
         .from("cohort_members")
@@ -854,6 +872,7 @@ const computeMyCohorts = unstable_cache(
         trainer: row.trainer_id ? trainerMap.get(row.trainer_id) ?? null : null,
         locked: row.locked,
         maxWeeks: row.max_weeks,
+        actionCategories: parseActionCategories(row.action_categories),
       };
     });
 
@@ -978,6 +997,7 @@ export async function getMyCohort(options?: { includeRoster?: boolean }): Promis
         // manage should never be blocked by it.
         locked: context.role === "user" && selected!.locked,
         maxWeeks: selected!.maxWeeks,
+        actionCategories: selected!.actionCategories ?? [],
       },
       roster,
     };

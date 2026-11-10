@@ -445,7 +445,7 @@ export default function ActionsClient() {
   // stalled while it works.
   const [autoCompleting, setAutoCompleting] = useState<{ count: number } | null>(null);
   const [editingUpcomingAction, setEditingUpcomingAction] = useState<ActionCard | null>(null);
-  const [editUpcomingForm, setEditUpcomingForm] = useState<{ title: string; how: string; why: string } | null>(null);
+  const [editUpcomingForm, setEditUpcomingForm] = useState<{ title: string; how: string; why: string; category: string } | null>(null);
   const [savingUpcomingEdit, setSavingUpcomingEdit] = useState(false);
   const [upcomingEditError, setUpcomingEditError] = useState<string | null>(null);
   const [commitmentScore, setCommitmentScore] = useState<{
@@ -797,9 +797,11 @@ export default function ActionsClient() {
     }
   }
 
+  const batchCategories = cohort?.actionCategories ?? [];
+
   function openUpcomingEdit(action: ActionCard) {
     setEditingUpcomingAction(action);
-    setEditUpcomingForm({ title: action.title, how: action.how, why: action.why });
+    setEditUpcomingForm({ title: action.title, how: action.how, why: action.why, category: action.category ?? "" });
     setUpcomingEditError(null);
   }
 
@@ -807,7 +809,13 @@ export default function ActionsClient() {
     if (!editingUpcomingAction || !editUpcomingForm) return;
     setSavingUpcomingEdit(true);
     setUpcomingEditError(null);
-    const result = await updateUpcomingPersonalAction(editingUpcomingAction.id, editUpcomingForm);
+    const result = await updateUpcomingPersonalAction(editingUpcomingAction.id, {
+      title: editUpcomingForm.title,
+      how: editUpcomingForm.how,
+      why: editUpcomingForm.why,
+      // Only send a picked category; an edit never clears one.
+      ...(batchCategories.length && editUpcomingForm.category ? { category: editUpcomingForm.category } : {}),
+    });
     setSavingUpcomingEdit(false);
     if (result.error) {
       setUpcomingEditError(result.error);
@@ -908,6 +916,7 @@ export default function ActionsClient() {
           <div className="actions-current-list" style={{ "--action-cols": Math.min(currentActions.length, 3) } as CSSProperties}>
             {currentActions.map(({ userAction, action }, index) => <article className="actions-current-card" key={userAction.id}>
               <div className="actions-current-top"><span>Action # {(action.planOrder ?? index) + 1}</span><em>{action.timeEstimate}{action.planPoints ? ` · Protect ${action.planPoints} points today` : ""}</em></div>
+              {action.category && <span className="actions-current-category">{action.category}</span>}
               <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
                 {action.imageUrl && (
                   <img src={action.imageUrl} alt="" width={88} height={88} style={{ width: 88, height: 88, borderRadius: 16, objectFit: "cover", display: "block", marginRight: 6, flexShrink: 0 }} />
@@ -976,6 +985,7 @@ export default function ActionsClient() {
                     <div className="plan-action-copy plan-action-copy--compact">
                       <h3 title={action.title}>{action.title}</h3>
                       <div className="plan-action-meta">
+                        {action.category && <span className="plan-action-category">{action.category}</span>}
                         <span><CalendarDays size={13} />{planIsArchived ? "Available to revisit" : formatDate(deliveryDate)}</span>
                         <span className="plan-action-points">{points}<i className="plan-gold-coin" aria-hidden="true" /></span>
                       </div>
@@ -1145,7 +1155,7 @@ export default function ActionsClient() {
       </div>;
     })(), document.body)}
 
-    {typeof document !== "undefined" && editingUpcomingAction && editUpcomingForm && createPortal(<div className="plan-edit-overlay"><div className="plan-edit-modal"><button className="plan-edit-close" onClick={() => { setEditingUpcomingAction(null); setEditUpcomingForm(null); }}><X size={18} /></button><span className="participant-eyebrow">Edit action</span><h3>Edit your action</h3><label>Action title<input value={editUpcomingForm.title} onChange={(event) => setEditUpcomingForm((current) => current ? { ...current, title: event.target.value } : current)} /></label><div className="plan-edit-how-why"><label><span>How to do it</span><textarea value={editUpcomingForm.how} onChange={(event) => setEditUpcomingForm((current) => current ? { ...current, how: event.target.value } : current)} /></label><label><span>Why it works</span><textarea value={editUpcomingForm.why} onChange={(event) => setEditUpcomingForm((current) => current ? { ...current, why: event.target.value } : current)} /></label></div>{upcomingEditError && <p className="plan-review-error">{upcomingEditError}</p>}<button className="journey-primary-button" disabled={savingUpcomingEdit || !editUpcomingForm.title.trim() || !editUpcomingForm.how.trim() || !editUpcomingForm.why.trim()} onClick={saveUpcomingEdit}>{savingUpcomingEdit ? "Saving…" : "Save"}</button></div></div>, document.body)}
+    {typeof document !== "undefined" && editingUpcomingAction && editUpcomingForm && createPortal(<div className="plan-edit-overlay"><div className="plan-edit-modal"><button className="plan-edit-close" onClick={() => { setEditingUpcomingAction(null); setEditUpcomingForm(null); }}><X size={18} /></button><span className="participant-eyebrow">Edit action</span><h3>Edit your action</h3><label>Action title<input value={editUpcomingForm.title} onChange={(event) => setEditUpcomingForm((current) => current ? { ...current, title: event.target.value } : current)} /></label>{batchCategories.length > 0 && <label>Category<select value={editUpcomingForm.category} onChange={(event) => setEditUpcomingForm((current) => current ? { ...current, category: event.target.value } : current)}>{!editUpcomingForm.category && <option value="" disabled>Choose a category</option>}{batchCategories.map((category) => <option key={category} value={category}>{category}</option>)}{editUpcomingForm.category && !batchCategories.includes(editUpcomingForm.category) && <option value={editUpcomingForm.category}>{editUpcomingForm.category}</option>}</select></label>}<div className="plan-edit-how-why"><label><span>How to do it</span><textarea value={editUpcomingForm.how} onChange={(event) => setEditUpcomingForm((current) => current ? { ...current, how: event.target.value } : current)} /></label><label><span>Why it works</span><textarea value={editUpcomingForm.why} onChange={(event) => setEditUpcomingForm((current) => current ? { ...current, why: event.target.value } : current)} /></label></div>{upcomingEditError && <p className="plan-review-error">{upcomingEditError}</p>}<button className="journey-primary-button" disabled={savingUpcomingEdit || !editUpcomingForm.title.trim() || !editUpcomingForm.how.trim() || !editUpcomingForm.why.trim()} onClick={saveUpcomingEdit}>{savingUpcomingEdit ? "Saving…" : "Save"}</button></div></div>, document.body)}
 
     <ActionCheckinModal
       open={Boolean(completingId)}

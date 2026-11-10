@@ -245,3 +245,129 @@ describe("generateDraftActions: pinned first action", () => {
     expect(result.drafts?.[0]?.title).toBe("Title 0");
   });
 });
+
+describe("generateDraftActions: batch action categories", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    generateContent.mockReset();
+  });
+
+  it("asks the model to pick a category per action and keeps the batch's spelling", async () => {
+    const { generateDraftActions, draftsToActionRows } = await import("@/lib/personal-action-generation");
+    const categories = ["Giving feedback", "Coaching", "Delegation"];
+
+    generateContent.mockResolvedValue({
+      text: JSON.stringify({
+        actions: [
+          { title: "T0", how: "H0", why: "W0", timeEstimate: "5 mins", category: "giving feedback" },
+          { title: "T1", how: "H1", why: "W1", timeEstimate: "5 mins", category: "Giving feedback" },
+          { title: "T2", how: "H2", why: "W2", timeEstimate: "5 mins", category: "Delegation." },
+        ],
+      }),
+    });
+
+    const result = await generateDraftActions({
+      trainingContent: "",
+      userNotes: "",
+      businessContext: "",
+      focusThemes: [],
+      count: 3,
+      categories,
+    });
+
+    // Uneven split is fine; near-miss spellings snap to the batch's own.
+    expect(result.drafts?.map((draft) => draft.category)).toEqual(["Giving feedback", "Giving feedback", "Delegation"]);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+
+    const request = generateContent.mock.calls[0][0];
+    expect(request.contents).toContain("ACTION_CATEGORIES");
+    expect(request.contents).toContain("- Delegation");
+    const itemSchema = request.config.responseSchema.properties.actions.items;
+    expect(itemSchema.properties.category.enum).toEqual(categories);
+    expect(itemSchema.required).toContain("category");
+
+    const rows = draftsToActionRows(result.drafts!, "company", "user", "cohort");
+    expect(rows.map((row) => row.category)).toEqual(["Giving feedback", "Giving feedback", "Delegation"]);
+  });
+
+  it("asks Gemini again to classify any action left without a category", async () => {
+    const { generateDraftActions } = await import("@/lib/personal-action-generation");
+    const categories = ["Giving feedback", "Coaching", "Delegation"];
+
+    generateContent
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          actions: [
+            { title: "T0", how: "H0", why: "W0", timeEstimate: "5 mins", category: "Coaching" },
+            { title: "T1", how: "H1", why: "W1", timeEstimate: "5 mins" },
+            { title: "T2", how: "H2", why: "W2", timeEstimate: "5 mins", category: "Something else" },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({ text: JSON.stringify({ categories: ["Delegation", "Giving feedback"] }) });
+
+    const result = await generateDraftActions({
+      trainingContent: "",
+      userNotes: "",
+      businessContext: "",
+      focusThemes: [],
+      count: 3,
+      categories,
+    });
+
+    expect(result.drafts?.map((draft) => draft.category)).toEqual(["Coaching", "Delegation", "Giving feedback"]);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    const followUp = generateContent.mock.calls[1][0];
+    expect(followUp.contents).toContain("What: T1");
+    expect(followUp.contents).toContain("What: T2");
+    expect(followUp.contents).not.toContain("What: T0");
+    expect(followUp.config.responseSchema.properties.categories.items.enum).toEqual(categories);
+  });
+
+  it("still tags every action when the follow-up call fails", async () => {
+    const { generateDraftActions } = await import("@/lib/personal-action-generation");
+    const categories = ["Giving feedback", "Delegation"];
+
+    generateContent
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          actions: [
+            { title: "Hand one task to a teammate", how: "Pick a task worth delegation", why: "Frees your time", timeEstimate: "5 mins" },
+            { title: "T1", how: "H1", why: "W1", timeEstimate: "5 mins" },
+          ],
+        }),
+      })
+      .mockRejectedValueOnce(new Error("network down"));
+
+    const result = await generateDraftActions({
+      trainingContent: "",
+      userNotes: "",
+      businessContext: "",
+      focusThemes: [],
+      count: 2,
+      categories,
+    });
+
+    expect(result.error).toBeUndefined();
+    // Word overlap ("delegation") wins; no overlap falls back to the first category.
+    expect(result.drafts?.map((draft) => draft.category)).toEqual(["Delegation", "Giving feedback"]);
+  });
+
+  it("leaves the schema and prompt category-free when the batch has none", async () => {
+    const { generateDraftActions } = await import("@/lib/personal-action-generation");
+    generateContent.mockResolvedValue(draftResponse(1));
+
+    const result = await generateDraftActions({
+      trainingContent: "",
+      userNotes: "",
+      businessContext: "",
+      focusThemes: [],
+      count: 1,
+    });
+
+    expect(result.drafts?.[0]?.category).toBeNull();
+    const request = generateContent.mock.calls[0][0];
+    expect(request.contents).not.toContain("ACTION_CATEGORIES");
+    expect(request.config.responseSchema.properties.actions.items.properties.category).toBeUndefined();
+  });
+});

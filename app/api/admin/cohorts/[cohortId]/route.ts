@@ -80,6 +80,7 @@ export async function GET(
         senderName: detailResult.cohort?.senderName ?? "",
         maxWeeks: detailResult.cohort?.maxWeeks ?? null,
         emailSubjects: detailResult.cohort?.emailSubjects ?? {},
+        actionCategories: detailResult.cohort?.actionCategories ?? [],
         companyUsers: usersResult.users ?? [],
         assignedContentIds: (contentResult.items ?? []).map((item) => item.id),
         libraryItems: libraryResult.items ?? [],

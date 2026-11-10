@@ -60,6 +60,7 @@ import {
   type BatchEmailSubjectKey,
   type BatchEmailSubjects,
 } from "@/lib/batch-email-subjects";
+import { ACTION_CATEGORY_MAX_LENGTH, MAX_ACTION_CATEGORIES } from "@/lib/action-categories";
 import { uploadCohortLogo } from "@/lib/cohort-logo-upload";
 import {
   assignContentToCohort,
@@ -100,6 +101,7 @@ type CohortSummary = {
   currentPhaseId?: string | null;
   maxWeeks?: number | null;
   emailSubjects?: BatchEmailSubjects;
+  actionCategories?: string[];
 };
 
 type CompanyUser = { id: string; full_name: string | null; email: string | null };
@@ -586,6 +588,7 @@ function CohortDetailPanel({
   const [senderName, setSenderName] = useState<string>(cohort.senderName ?? "");
   const [maxWeeks, setMaxWeeks] = useState<string>(cohort.maxWeeks != null ? String(cohort.maxWeeks) : "");
   const [emailSubjects, setEmailSubjects] = useState<BatchEmailSubjects>(cohort.emailSubjects ?? {});
+  const [actionCategories, setActionCategories] = useState<string[]>(cohort.actionCategories ?? []);
   const [notices, setNotices] = useState<CohortNotice[]>([]);
   const [noticeDraft, setNoticeDraft] = useState("");
   const [facilitators, setFacilitators] = useState<Facilitator[]>([]);
@@ -663,6 +666,7 @@ function CohortDetailPanel({
     setSenderName(detailResult.cohort?.senderName ?? "");
     setMaxWeeks(detailResult.cohort?.maxWeeks != null ? String(detailResult.cohort.maxWeeks) : "");
     setEmailSubjects(detailResult.cohort?.emailSubjects ?? {});
+    setActionCategories(detailResult.cohort?.actionCategories ?? []);
     // Merge (not replace) so a just-created, not-yet-assigned team stays in
     // the list even though it can't come back from the roster itself.
     setCohortTags((current) => mergeTagsFromMembers(detailResult.members ?? [], current));
@@ -716,6 +720,7 @@ function CohortDetailPanel({
         senderName?: string;
         maxWeeks?: number | null;
         emailSubjects?: BatchEmailSubjects;
+        actionCategories?: string[];
         companyUsers?: CompanyUser[];
         assignedContentIds?: string[];
         libraryItems?: PrepareContentItem[];
@@ -742,6 +747,7 @@ function CohortDetailPanel({
       setSenderName(payload.senderName ?? "");
       setMaxWeeks(payload.maxWeeks != null ? String(payload.maxWeeks) : "");
       setEmailSubjects(payload.emailSubjects ?? {});
+      setActionCategories(payload.actionCategories ?? []);
       setNotices(payload.notices ?? []);
       setFacilitators(payload.facilitators ?? []);
     } catch (caughtError) {
@@ -917,6 +923,18 @@ function CohortDetailPanel({
       "save-email-subjects",
       () => updateCohort(cohort.id, { emailSubjects: overrides }),
       { syncList: true }
+    );
+  }
+
+  const cleanedActionCategories = actionCategories.map((category) => category.trim()).filter(Boolean);
+  const actionCategoriesDirty =
+    cleanedActionCategories.join("\n") !== (cohort.actionCategories ?? []).join("\n");
+
+  async function handleSaveActionCategories() {
+    await runMutation(
+      "save-action-categories",
+      () => updateCohort(cohort.id, { actionCategories: cleanedActionCategories }),
+      { syncList: true, after: () => setActionCategories(cleanedActionCategories) }
     );
   }
 
@@ -1685,6 +1703,63 @@ function CohortDetailPanel({
                 >
                   {busyAction === "save-email-subjects" ? <Loader2 size={15} className="cohort-admin-spin" /> : <Check size={15} />}
                   {busyAction === "save-email-subjects" ? "Saving…" : "Save subjects"}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {role === "superadmin" && (
+            <section className="cohort-admin-panel cohort-admin-panel--wide">
+              <div className="cohort-admin-panel-head">
+                <div>
+                  <h3>Action categories</h3>
+                  <p>
+                    Up to {MAX_ACTION_CATEGORIES} categories for this batch's actions. When a participant's plan is generated, the AI tags each action with the category that fits it best — they don't need to be spread evenly.
+                    Participants can change an action's category when they edit it. Leave empty to skip categories. Applies to actions generated after saving.
+                  </p>
+                </div>
+              </div>
+              {actionCategories.map((category, index) => (
+                <div key={index} className="cohort-admin-panel-action">
+                  <label className="cohort-admin-field" style={{ flex: 1 }}>
+                    <span>Category {index + 1}</span>
+                    <input
+                      value={category}
+                      onChange={(event) => setActionCategories((current) => current.map((value, i) => (i === index ? event.target.value : value)))}
+                      disabled={Boolean(busyAction)}
+                      maxLength={ACTION_CATEGORY_MAX_LENGTH}
+                      placeholder="e.g. Giving feedback"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setActionCategories((current) => current.filter((_, i) => i !== index))}
+                    disabled={Boolean(busyAction)}
+                    className="cohort-admin-button cohort-admin-button--secondary"
+                    aria-label={`Remove category ${index + 1}`}
+                    title="Remove category"
+                  >
+                    <X size={15} /> Remove
+                  </button>
+                </div>
+              ))}
+              <div className="cohort-admin-panel-action">
+                <button
+                  type="button"
+                  onClick={() => setActionCategories((current) => [...current, ""])}
+                  disabled={Boolean(busyAction) || actionCategories.length >= MAX_ACTION_CATEGORIES}
+                  className="cohort-admin-button cohort-admin-button--secondary"
+                >
+                  <Plus size={15} /> Add category
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveActionCategories()}
+                  disabled={Boolean(busyAction) || !actionCategoriesDirty}
+                  className="cohort-admin-button cohort-admin-button--primary"
+                >
+                  {busyAction === "save-action-categories" ? <Loader2 size={15} className="cohort-admin-spin" /> : <Check size={15} />}
+                  {busyAction === "save-action-categories" ? "Saving…" : "Save categories"}
                 </button>
               </div>
             </section>
