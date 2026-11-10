@@ -73,7 +73,7 @@ interface EngineContextType {
 
 const EngineContext = createContext<EngineContextType | undefined>(undefined);
 
-function mapDbAction(row: { id: string; cohort_id?: string | null; plan_order?: number | null; theme: string; title: string; how: string; why: string; time_estimate: string; is_personal?: boolean | null; plan_points?: number | null; image_url?: string | null }): ActionCard {
+function mapDbAction(row: { id: string; cohort_id?: string | null; plan_order?: number | null; theme: string; title: string; how: string; why: string; time_estimate: string; is_personal?: boolean | null; plan_points?: number | null; image_url?: string | null; category?: string | null }): ActionCard {
   return {
     id: row.id,
     cohortId: row.cohort_id,
@@ -86,6 +86,7 @@ function mapDbAction(row: { id: string; cohort_id?: string | null; plan_order?: 
     isPersonal: row.is_personal ?? false,
     planPoints: row.plan_points ?? undefined,
     imageUrl: row.image_url ?? null,
+    category: row.category ?? null,
   };
 }
 
@@ -261,7 +262,7 @@ export const EngineProvider: React.FC<{ children: React.ReactNode; adminCompanyI
         ? Promise.all([
             supabase
               .from("actions")
-              .select("id, cohort_id, plan_order, theme, title, how, why, time_estimate, is_personal, image_url")
+              .select("id, cohort_id, plan_order, theme, title, how, why, time_estimate, is_personal, image_url, category")
               .eq("company_id", companyId)
               .eq("cohort_id", selectedCohortId)
               .order("plan_order", { ascending: true, nullsFirst: false })

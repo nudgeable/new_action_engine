@@ -272,6 +272,8 @@ export interface DashboardLeaderboardEntry {
   notCompletedCount: number;
   /** WhatsApp number on file: "active", "opted_out" (replied STOP), or null when none. */
   whatsapp: "active" | "opted_out" | null;
+  /** Nudge emails an admin has sent this member from the leaderboard (successful sends). */
+  nudgeCount: number;
 }
 
 /** Map user_id → buddy display name for the given cohorts (joins unique names when a
@@ -345,12 +347,23 @@ export async function getDashboardLeaderboard(
     );
 
     const cohortIds = await resolveCohortIds(admin, resolvedCompanyId, cohortId ?? null);
-    const [commitmentByCohort, buddyByUser, emailOpensByUser, whatsappResult] = await Promise.all([
+    const [commitmentByCohort, buddyByUser, emailOpensByUser, whatsappResult, nudgeResult] = await Promise.all([
       loadCommitmentWalletByCohort(admin, cohortIds),
       loadBuddyNamesByUser(admin, cohortIds, userIds),
       loadMemberEmailOpenCounts(admin, userIds, cohortIds),
       admin.from("whatsapp_contacts").select("user_id, phone, opted_out_at").in("user_id", userIds),
+      // Admin nudges (app/actions/admin-nudge.ts), counted per person across batches.
+      admin
+        .from("email_campaign_logs")
+        .select("user_id")
+        .eq("template_id", "admin_nudge")
+        .eq("status", "sent")
+        .in("user_id", userIds),
     ]);
+    const nudgeCountByUser = new Map<string, number>();
+    for (const row of (nudgeResult.data ?? []) as { user_id: string }[]) {
+      nudgeCountByUser.set(row.user_id, (nudgeCountByUser.get(row.user_id) ?? 0) + 1);
+    }
     const whatsappByUser = new Map<string, "active" | "opted_out">();
     for (const contact of (whatsappResult.data ?? []) as { user_id: string; phone: string | null; opted_out_at: string | null }[]) {
       if (contact.phone?.trim()) whatsappByUser.set(contact.user_id, contact.opted_out_at ? "opted_out" : "active");
@@ -423,6 +436,7 @@ export async function getDashboardLeaderboard(
         pendingValidationCount: pendingByUser.get(id) ?? 0,
         notCompletedCount: notCompletedByUser.get(id) ?? 0,
         whatsapp: whatsappByUser.get(id) ?? null,
+        nudgeCount: nudgeCountByUser.get(id) ?? 0,
       };
     });
     entries.sort((a, b) => b.commitmentPct - a.commitmentPct || b.commitmentPoints - a.commitmentPoints);

@@ -3,6 +3,7 @@ import { getGeminiClient, isGeminiConfigured, GEMINI_MODEL } from "@/lib/gemini"
 import { callGeminiWithLimit, isRateLimitError } from "@/lib/gemini-limiter";
 import type { ActionTheme } from "@/lib/types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { matchActionCategory } from "@/lib/action-categories";
 import { IST_OFFSET_MINUTES, getCurrentISTDate, utcToISTDate, utcToISTTime, utcToISTDateTime, istToUTCDateTime } from "@/lib/timezone-utils";
 
 export type DraftAction = {
@@ -11,6 +12,8 @@ export type DraftAction = {
   how: string;
   why: string;
   timeEstimate: string;
+  /** One of the batch's action categories, or null when it has none. */
+  category: string | null;
 };
 
 export const THEMES: ActionTheme[] = ["Collaboration", "Feedback", "Accountability", "Connection", "Coaching"];
@@ -51,6 +54,28 @@ export const BACKGROUND_BATCH_SIZE = 12;
 export const MAX_WEEKLY_ACTIONS = 3;
 /** IST weekdays used by daily plans: Monday through Friday. */
 export const DAILY_DELIVERY_DAYS = [1, 2, 3, 4, 5] as const;
+
+/** Response schema; with categories, each action must pick one of them. */
+function buildDraftSchema(categories: string[]) {
+  if (!categories.length) return draftSchema;
+  const item = draftSchema.properties.actions.items;
+  return {
+    ...draftSchema,
+    properties: {
+      actions: {
+        ...draftSchema.properties.actions,
+        items: {
+          ...item,
+          properties: {
+            ...item.properties,
+            category: { type: Type.STRING, format: "enum", enum: categories },
+          },
+          required: [...item.required, "category"],
+        },
+      },
+    },
+  };
+}
 
 const draftSchema = {
   type: Type.OBJECT,
@@ -108,7 +133,8 @@ function buildPrompt(
   focusThemes: ActionTheme[],
   count: number,
   avoidTitles?: string[],
-  pinnedFirstAction?: string
+  pinnedFirstAction?: string,
+  categories: string[] = []
 ): string {
   const avoidBlock = avoidTitles?.length
     ? `\n\nACTIONS TO AVOID\nDo not repeat these actions or close variants:\n${avoidTitles.map((t) => `- ${t}`).join("\n")}`
@@ -119,6 +145,10 @@ function buildPrompt(
   // their chosen total plan size (durationWeeks x actions/day, etc.) is unchanged.
   const pinnedBlock = pinnedFirstAction
     ? `\n\nREQUIRED FIRST ACTION\nThe action at index 0 of the "actions" array must use exactly this title, word for word, with no rewording: "${pinnedFirstAction}"\nWrite its "how", "why", and "timeEstimate" following the FORMAT AND QUALITY RULES below. This counts as one of the ${count} actions requested above, not an addition to them. Generate the remaining ${Math.max(count - 1, 0)} action(s) normally, distinct from it and from each other.`
+    : "";
+
+  const categoryBlock = categories.length
+    ? `\n\nACTION_CATEGORIES\nThis batch groups its actions into these categories:\n${categories.map((c) => `- ${c}`).join("\n")}\nEvery action must have a "category" — never leave it blank. Set it to the single category above that fits the action best, copied exactly. Choose by fit — the actions do not need to be spread evenly across categories, and some categories may go unused.`
     : "";
 
   const focusNote = focusThemes.length
@@ -163,9 +193,92 @@ FORMAT AND QUALITY RULES
 - "why" is the Why: exactly one sentence, at most 15 words, in simple English for Indian audience. Start with the benefit, not the action. Do not use corporate jargon such as leverage, synergy, align, or touch base.
 - "timeEstimate" is a realistic value such as "2 mins", "5 mins", "15 mins", or "30 mins".
 - Keep the actions practical, distinct from one another, and realistic during normal work.
-- Do not add theme labels, category tags, bullets inside fields, or commentary outside the required JSON.${avoidBlock}
+- Do not add theme labels, category tags, or bullets inside the title, how, or why text, or commentary outside the required JSON.${categoryBlock}${avoidBlock}
 
 Before returning the result, silently check that every action reflects the available inputs, and that every How and Why is exactly one sentence and at most 15 words.`;
+}
+
+function normaliseCategoryText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** Like matchActionCategory, but also accepts near misses such as
+ * "Feedback" for "Giving feedback" or a trailing "." from the model. */
+function looseMatchActionCategory(value: unknown, categories: string[]): string | null {
+  const exact = matchActionCategory(value, categories);
+  if (exact || typeof value !== "string") return exact;
+  const wanted = normaliseCategoryText(value);
+  if (!wanted) return null;
+  return categories.find((category) => normaliseCategoryText(category) === wanted)
+    ?? categories.find((category) => {
+      const name = normaliseCategoryText(category);
+      return name.includes(wanted) || wanted.includes(name);
+    })
+    ?? null;
+}
+
+/** Last resort: the category sharing the most words with the action's text
+ * (ties, including no overlap at all, go to the earliest category). */
+function closestCategoryByWords(draft: Pick<DraftAction, "title" | "how" | "why">, categories: string[]): string {
+  const actionWords = new Set(normaliseCategoryText(`${draft.title} ${draft.how} ${draft.why}`).split(" "));
+  let best = categories[0];
+  let bestScore = 0;
+  for (const category of categories) {
+    const score = normaliseCategoryText(category)
+      .split(" ")
+      .filter((word) => word.length > 2 && actionWords.has(word)).length;
+    if (score > bestScore) {
+      best = category;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/**
+ * Guarantees a category on every draft when the batch has categories. The
+ * main generation call already requires one, so this normally does nothing;
+ * for any the model left blank or off-list it asks Gemini once more, just to
+ * classify those actions, and falls back to word overlap if that fails too.
+ */
+async function ensureEveryDraftHasCategory(drafts: DraftAction[], categories: string[]): Promise<void> {
+  const missing = drafts.filter((draft) => !draft.category);
+  if (!missing.length) return;
+
+  try {
+    const ai = getGeminiClient();
+    const response = await callGeminiWithLimit(() =>
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: `Assign each action below to the single category that fits it best. Use only these categories, copied exactly:\n${categories.map((c) => `- ${c}`).join("\n")}\n\nReturn "categories" with exactly ${missing.length} entries, in the same order as the actions.\n\n${missing.map((draft, index) => `ACTION ${index + 1}\nWhat: ${draft.title}\nHow: ${draft.how}\nWhy: ${draft.why}`).join("\n\n")}`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              categories: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING, format: "enum", enum: categories },
+              },
+            },
+            required: ["categories"],
+          },
+        },
+      })
+    );
+    const picks = (JSON.parse(response.text ?? "{}") as { categories?: unknown }).categories;
+    if (Array.isArray(picks)) {
+      missing.forEach((draft, index) => {
+        draft.category = looseMatchActionCategory(picks[index], categories);
+      });
+    }
+  } catch {
+    // Fall through to the word-overlap fallback below.
+  }
+
+  for (const draft of missing) {
+    if (!draft.category) draft.category = closestCategoryByWords(draft, categories);
+  }
 }
 
 /** Calls Gemini to draft `count` new personal actions. Does not persist anything. */
@@ -178,6 +291,8 @@ export async function generateDraftActions(params: {
   avoidTitles?: string[];
   /** Exact title (see getPinnedFirstActionTitle) that must land at index 0 of this batch. */
   pinnedFirstAction?: string;
+  /** The batch's action categories (cohorts.action_categories); the AI tags each action with one. */
+  categories?: string[];
 }): Promise<{ drafts?: DraftAction[]; error?: string }> {
   try {
     if (!isGeminiConfigured()) {
@@ -185,6 +300,7 @@ export async function generateDraftActions(params: {
     }
 
     const count = params.count ?? DEFAULT_BATCH_SIZE;
+    const categories = params.categories ?? [];
     const ai = getGeminiClient();
     // Bounded by GEMINI_MAX_CONCURRENCY so a burst of concurrent generation
     // jobs (one per user) can't exceed Gemini's rate limit; a 429 is retried
@@ -199,11 +315,12 @@ export async function generateDraftActions(params: {
           params.focusThemes,
           count,
           params.avoidTitles,
-          params.pinnedFirstAction
+          params.pinnedFirstAction,
+          categories
         ),
         config: {
           responseMimeType: "application/json",
-          responseSchema: draftSchema,
+          responseSchema: buildDraftSchema(categories),
         },
       })
     );
@@ -213,7 +330,7 @@ export async function generateDraftActions(params: {
       return { error: "AI returned an empty response" };
     }
 
-    let parsed: { actions?: Array<{ title?: string; how?: string; why?: string; timeEstimate?: string }> };
+    let parsed: { actions?: Array<{ title?: string; how?: string; why?: string; timeEstimate?: string; category?: string }> };
     try {
       parsed = JSON.parse(text);
     } catch {
@@ -233,6 +350,9 @@ export async function generateDraftActions(params: {
       how: a.how!.trim(),
       why: a.why!.trim(),
       timeEstimate: a.timeEstimate?.trim() || "5 mins",
+      // The schema restricts this to the batch's list, but normalise the
+      // spelling; anything still unmatched is filled in further down.
+      category: looseMatchActionCategory(a.category, categories),
     }));
 
     // The prompt asks for exactly `count` actions, but that's an instruction,
@@ -249,6 +369,11 @@ export async function generateDraftActions(params: {
     // wording never drifts even if the model paraphrases it.
     if (params.pinnedFirstAction && resolvedDrafts[0]) {
       resolvedDrafts[0].title = params.pinnedFirstAction;
+    }
+
+    // When the batch has categories, every action must carry one.
+    if (categories.length) {
+      await ensureEveryDraftHasCategory(resolvedDrafts, categories);
     }
 
     return { drafts: resolvedDrafts };
@@ -361,6 +486,7 @@ export function draftsToActionRows(
     how: d.how,
     why: d.why,
     time_estimate: d.timeEstimate,
+    category: d.category ?? null,
     is_system_action: false,
   }));
 }

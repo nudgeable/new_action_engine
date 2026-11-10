@@ -4045,6 +4045,25 @@ input[type="range"] {
   box-shadow: 0 0 0 4px rgba(35, 206, 107, .16);
 }
 
+/* Batch action category (cohorts.action_categories) on a Current action card. */
+.actions-current-category {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f1eefc;
+  color: #4b3a8f;
+  font-size: 10px;
+  font-weight: 800;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .actions-current-top em {
   padding: 6px 9px;
   border: 1px solid rgba(34, 29, 35, .06);
@@ -10405,6 +10424,18 @@ input[type="range"] {
 
 .plan-action-meta.is-immediate>span:first-child {
   color: #745a00 !important;
+}
+
+/* Batch action category (cohorts.action_categories) shown on a plan row. */
+.plan-action-meta>.plan-action-category {
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1eefc;
+  color: #4b3a8f !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .plan-action-points {

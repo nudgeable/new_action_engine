@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDraftActions, draftsToActionRows, assignScheduledBatch, getPinnedFirstActionTitle } from "@/lib/personal-action-generation";
 import { matchActionImagesForRows } from "@/lib/action-image-matching";
+import { parseActionCategories } from "@/lib/action-categories";
 
 /**
  * Background worker for filling a user's full multi-week action plan.
@@ -107,9 +108,10 @@ export async function POST(request: Request) {
 
   const { data: cohortGenerationContext } = await admin
     .from("cohorts")
-    .select("training_content, business_context")
+    .select("training_content, business_context, action_categories")
     .eq("id", job.cohort_id)
     .single();
+  const categories = parseActionCategories(cohortGenerationContext?.action_categories);
 
   let generationResult = await generateDraftActions({
     trainingContent: cohortGenerationContext?.training_content ?? "",
@@ -119,6 +121,7 @@ export async function POST(request: Request) {
     count,
     avoidTitles,
     pinnedFirstAction: pinnedFirstAction ?? undefined,
+    categories,
   });
   if (generationResult.error || !generationResult.drafts?.length) {
     // A temporary provider/network failure should not discard the participant's
@@ -131,6 +134,7 @@ export async function POST(request: Request) {
       count,
       avoidTitles,
       pinnedFirstAction: pinnedFirstAction ?? undefined,
+      categories,
     });
   }
   const { drafts, error } = generationResult;

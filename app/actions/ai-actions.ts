@@ -27,6 +27,7 @@ import { renderEmailTemplate, formatPlanActionDate } from "@/lib/email-templates
 import { buildFromHeader } from "@/lib/email-send";
 import { buildActionPlanPdf } from "@/lib/action-plan-pdf";
 import { matchActionImagesForRows } from "@/lib/action-image-matching";
+import { matchActionCategory, parseActionCategories } from "@/lib/action-categories";
 import { assignSurpriseResourcesForPlan } from "@/lib/surprise-resource-assignment";
 import { saveWhatsAppNumber } from "@/lib/whatsapp-contact-store";
 
@@ -861,7 +862,13 @@ export async function updatePersonalAction(
  */
 export async function updateUpcomingPersonalAction(
   id: string,
-  params: { title: string; how: string; why: string }
+  params: {
+    title: string;
+    how: string;
+    why: string;
+    /** One of the batch's action categories. Undefined leaves it unchanged; it can't be cleared. */
+    category?: string | null;
+  }
 ): Promise<{ error?: string }> {
   try {
     const title = params.title.trim();
@@ -875,12 +882,23 @@ export async function updateUpcomingPersonalAction(
 
     const { data: action } = await supabase
       .from("actions")
-      .select("id")
+      .select("id, cohort_id")
       .eq("id", id)
       .eq("created_by", user.id)
       .eq("is_personal", true)
       .maybeSingle();
     if (!action) return { error: "Action not found" };
+
+    const updates: { title: string; how: string; why: string; category?: string | null } = { title, how, why };
+    if (params.category !== undefined) {
+      // Every action keeps a category, so only accept one of this batch's own.
+      const { data: cohortRow } = action.cohort_id
+        ? await supabase.from("cohorts").select("action_categories").eq("id", action.cohort_id).maybeSingle()
+        : { data: null };
+      const category = matchActionCategory(params.category, parseActionCategories(cohortRow?.action_categories));
+      if (!category) return { error: "Pick one of this batch's categories" };
+      updates.category = category;
+    }
 
     const { data: delivered } = await supabase
       .from("user_actions")
@@ -892,7 +910,7 @@ export async function updateUpcomingPersonalAction(
 
     const { error } = await supabase
       .from("actions")
-      .update({ title, how, why })
+      .update(updates)
       .eq("id", id)
       .eq("created_by", user.id)
       .eq("is_personal", true);
@@ -964,7 +982,7 @@ export async function generateOneMorePersonalAction(): Promise<{ error?: string 
 
     const { data: cohortGenerationContext, error: cohortGenerationContextError } = await supabase
       .from("cohorts")
-      .select("training_content, business_context")
+      .select("training_content, business_context, action_categories")
       .eq("id", cohortId)
       .single();
     if (cohortGenerationContextError) return { error: cohortGenerationContextError.message };
@@ -976,6 +994,7 @@ export async function generateOneMorePersonalAction(): Promise<{ error?: string 
       focusThemes,
       count: 1,
       avoidTitles,
+      categories: parseActionCategories(cohortGenerationContext?.action_categories),
     });
     if (generateError || !drafts?.length) {
       return { error: generateError ?? "AI did not return an action" };
