@@ -46,8 +46,7 @@ describe("buildCompletionFollowUp", () => {
     expect(interactive.type).toBe("button");
     expect(interactive.body.text).toBe(
       [
-        "✅ Saved! Action 2 is marked done:",
-        "2️⃣ Action 2",
+        "✅ Saved! Action 2 is marked done.",
         "",
         "2 actions left:",
         "",
@@ -88,8 +87,7 @@ describe("buildCompletionFollowUp", () => {
     expect(buildCompletionFollowUp({ completion: completed("Action 1"), tappedNumber: 1, actions: states([1, 2, 3]) })).toEqual({
       kind: "text",
       body: [
-        "✅ Saved! Action 1 is marked done:",
-        "1️⃣ Action 1",
+        "✅ Saved! Action 1 is marked done.",
         "",
         "🎉 Well done, you've completed all your actions! Keep the momentum going.",
       ].join("\n"),

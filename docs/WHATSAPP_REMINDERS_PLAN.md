@@ -152,8 +152,8 @@ line in the template itself: one UTILITY template per action count, chosen by
 - A tap arrives on the webhook; `lib/whatsapp-inbound.ts` maps the sender's
   number → participant (`whatsapp_contacts`), completes the action
   (`completeActionFromWhatsApp`) and replies, free-form (the tap opened the
-  24-hour window, no template): "✅ Saved! Action 2 is marked done" (no points
-  or Surprise Box line),
+  24-hour window, no template): "✅ Saved! Action 2 is marked done." (number only,
+  not the title, and no points or Surprise Box line),
   "2 actions left: 1️⃣ … 3️⃣ …" with [Action 1 done] [Action 3 done]; repeats per tap until
   "🎉 Well done, you've completed all your actions! Keep the momentum going." (`buildCompletionFollowUp`).
 - `supabase/migrations/085_complete_action_for_user.sql`:

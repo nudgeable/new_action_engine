@@ -4,10 +4,13 @@
  * open (Option A in docs/WHATSAPP_REMINDERS_PLAN.md):
  *
  *   reminder: 1️⃣ … 2️⃣ … 3️⃣ …   [Action 1 done] [Action 2 done] [Action 3 done]
- *   tap "Action 2 done" → "✅ Saved: 2️⃣ …  2 actions left: 1️⃣ 3️⃣"
+ *   tap "Action 2 done" → "✅ Saved! Action 2 is marked done.  2 actions left: 1️⃣ 3️⃣"
  *                          + [Action 1 done] [Action 3 done]
- *   tap "Action 3 done" → "✅ Saved: 3️⃣ …  1 action left: 1️⃣" + [Action 1 done]
- *   tap "Action 1 done" → "✅ Saved: 1️⃣ …  🎉 all done"
+ *   tap "Action 3 done" → "✅ Saved! Action 3 …  1 action left: 1️⃣" + [Action 1 done]
+ *   tap "Action 1 done" → "✅ Saved! Action 1 …  🎉 all done"
+ *
+ * The confirmation names only the number, not the title, so the reply lists
+ * just the actions still open.
  *
  * Every Done payload carries the whole reminder's action list plus which
  * number was tapped ("done:<n>:<id1>,<id2>,…", ids without dashes), so the
@@ -240,11 +243,12 @@ export function buildCompletionFollowUp(params: {
     };
   }
 
-  const tappedTitle = actions.find((action) => action.number === tappedNumber)?.title ?? completion.title;
+  // Only the number: repeating the done action's title next to the open list
+  // read like two lists.
   const lines =
     completion.outcome === "completed"
-      ? [`✅ Saved! Action ${tappedNumber} is marked done:`, `${numberEmoji(tappedNumber)} ${tappedTitle}`]
-      : [`👍 Action ${tappedNumber} was already marked done:`, `${numberEmoji(tappedNumber)} ${tappedTitle}`];
+      ? [`✅ Saved! Action ${tappedNumber} is marked done.`]
+      : [`👍 Action ${tappedNumber} was already marked done.`];
   // No points or Surprise Box lines: the reply only confirms the action (the
   // box still unlocks and shows in the app as usual).
   if (completion.outcome === "completed" && completion.completedLate) {
