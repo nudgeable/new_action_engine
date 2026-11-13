@@ -34,7 +34,7 @@ import {
   type ReminderAction,
   type ReminderSubscription,
 } from "@/lib/action-reminders";
-import { areImageTemplatesEnabled, buildActionReminder, buildWeeklyRecap } from "@/lib/whatsapp-templates";
+import { buildActionReminder, buildWeeklyRecap } from "@/lib/whatsapp-templates";
 import { isWhatsAppSendConfigured, sendWhatsAppTemplate, type WhatsAppSendResult } from "@/lib/whatsapp";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -127,7 +127,6 @@ export async function sendPreparedWhatsAppReminder(
     companyName: prepared.companyName,
     track: prepared.sub.track,
     actions: prepared.actions.map((action) => ({ id: action.id, title: action.title, imageUrl: action.imageUrl })),
-    withImage: areImageTemplatesEnabled(),
   });
   const result = await sendWhatsAppTemplate({
     to: prepared.phone ?? "",

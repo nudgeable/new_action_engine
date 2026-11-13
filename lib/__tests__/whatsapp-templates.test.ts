@@ -84,7 +84,6 @@ describe("buildActionReminder", () => {
       firstName: "Asha",
       companyName: "Acme",
       track: "weekly",
-      withImage: true,
       actions: [
         { id: A1, title: "A", imageUrl: img },
         { id: A2, title: "B", imageUrl: null },
@@ -95,16 +94,11 @@ describe("buildActionReminder", () => {
     expect(components[1].type).toBe("body");
   });
 
-  it("stays on the plain template when images are off or the first action has none", () => {
-    const actions = [{ id: A1, title: "A", imageUrl: "https://x.co/a.png" }];
-    expect(buildActionReminder({ firstName: null, companyName: null, track: "daily", actions }).template.name).toBe(
-      "plan_reminder_1"
-    );
+  it("stays on the plain template when the first action has no usable image", () => {
     const noImage = buildActionReminder({
       firstName: null,
       companyName: null,
       track: "daily",
-      withImage: true,
       actions: [{ id: A1, title: "A", imageUrl: "http://insecure/a.png" }],
     });
     expect(noImage.template.name).toBe("plan_reminder_1");

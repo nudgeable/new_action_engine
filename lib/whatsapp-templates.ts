@@ -75,9 +75,8 @@
  * templates (same category, body, footer and buttons) plus an IMAGE header,
  * which shows the first action's illustration (actions.image_url). A template
  * message can carry only one image, so the other actions stay text-only.
- * They are used only when WHATSAPP_IMAGE_TEMPLATES=1 (set it once Meta has
- * approved all three — sending an unapproved template fails) and the first
- * action has an image; otherwise the plain template above is sent.
+ * (Approved by Meta 2026-11-13.) A reminder whose first action has no image
+ * uses the plain template above.
  */
 import { doneButtonPayload, recapAllPayload, recapSomePayload } from "@/lib/whatsapp-action-completion";
 import { whatsAppImageLink } from "@/lib/whatsapp-media";
@@ -97,11 +96,6 @@ export function actionReminderTemplateName(actionCount: number, withImage = fals
 
 export function weeklyRecapTemplateName(actionCount: number): string {
   return `plan_recap_${templateSlots(actionCount)}`;
-}
-
-/** True once the plan_reminder_img_* templates are approved and switched on. */
-export function areImageTemplatesEnabled(): boolean {
-  return process.env.WHATSAPP_IMAGE_TEMPLATES === "1";
 }
 
 /** Template parameters can't contain newlines/tabs or 4+ consecutive spaces. */
@@ -148,13 +142,12 @@ export function buildActionReminder(params: {
   /** "from your {{company}} plan"; falls back to "Nudgeable". */
   companyName: string | null;
   track: "daily" | "weekly";
+  /** The first action's image, if any, picks the plan_reminder_img_* variant. */
   actions: { id: string; title: string; imageUrl?: string | null }[];
-  /** Use the plan_reminder_img_* variant when the first action has an image. */
-  withImage?: boolean;
 }): TemplateMessage {
   if (!params.actions.length) throw new Error("An action reminder needs at least one action");
   const lines = actionLines(params.actions.map((action) => action.title));
-  const imageLink = params.withImage ? whatsAppImageLink(params.actions[0].imageUrl) : null;
+  const imageLink = whatsAppImageLink(params.actions[0].imageUrl);
   const buttonActionIds = params.actions.slice(0, lines.length).map((action) => action.id);
   const doneButtons = buttonActionIds.map(
     (_actionId, index): TemplateComponent => ({
