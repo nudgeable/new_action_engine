@@ -27,6 +27,7 @@ describe("actionReminderTemplateName", () => {
     expect(actionReminderTemplateName(2)).toBe("plan_reminder_2");
     expect(actionReminderTemplateName(3)).toBe("plan_reminder_3");
     expect(actionReminderTemplateName(5)).toBe("plan_reminder_3");
+    expect(actionReminderTemplateName(2, true)).toBe("plan_reminder_img_2");
   });
 });
 
@@ -75,6 +76,33 @@ describe("buildActionReminder", () => {
         { type: "button", sub_type: "quick_reply", index: "1", parameters: [{ type: "payload", payload: doneButtonPayload([A1, A2], 2) }] },
       ],
     });
+  });
+
+  it("uses the image variant with the first action's picture as the header", () => {
+    const img = "https://x.supabase.co/storage/v1/object/public/action-images/library/a.png";
+    const { template, components } = buildActionReminder({
+      firstName: "Asha",
+      companyName: "Acme",
+      track: "weekly",
+      actions: [
+        { id: A1, title: "A", imageUrl: img },
+        { id: A2, title: "B", imageUrl: null },
+      ],
+    });
+    expect(template.name).toBe("plan_reminder_img_2");
+    expect(components[0]).toEqual({ type: "header", parameters: [{ type: "image", image: { link: img } }] });
+    expect(components[1].type).toBe("body");
+  });
+
+  it("stays on the plain template when the first action has no usable image", () => {
+    const noImage = buildActionReminder({
+      firstName: null,
+      companyName: null,
+      track: "daily",
+      actions: [{ id: A1, title: "A", imageUrl: "http://insecure/a.png" }],
+    });
+    expect(noImage.template.name).toBe("plan_reminder_1");
+    expect(noImage.components.some((c) => c.type === "header")).toBe(false);
   });
 
   it("falls back for a missing name and company, and says 'today' for daily plans", () => {

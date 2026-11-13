@@ -46,8 +46,7 @@ describe("buildCompletionFollowUp", () => {
     expect(interactive.type).toBe("button");
     expect(interactive.body.text).toBe(
       [
-        "✅ Saved! Action 2 is marked done:",
-        "2️⃣ Action 2",
+        "✅ Saved! Action 2 is marked done.",
         "",
         "2 actions left:",
         "",
@@ -72,12 +71,23 @@ describe("buildCompletionFollowUp", () => {
     expect(interactive.action.buttons.map((button) => button.reply.title)).toEqual(["Action 1 done"]);
   });
 
+  it("shows the next open action's image as the header, and none without one", () => {
+    const img = "https://x.supabase.co/storage/v1/object/public/action-images/library/a3.png";
+    const withImages = states([1, 2]).map((state) => ({ ...state, imageUrl: state.number === 3 ? img : null }));
+    const message = buildCompletionFollowUp({ completion: completed("Action 2"), tappedNumber: 2, actions: withImages });
+    if (message.kind !== "interactive") throw new Error("expected buttons");
+    expect(message.interactive.header).toEqual({ type: "image", image: { link: img } });
+
+    const plain = buildCompletionFollowUp({ completion: completed("Action 2"), tappedNumber: 2, actions: states([2]) });
+    if (plain.kind !== "interactive") throw new Error("expected buttons");
+    expect(plain.interactive.header).toBeUndefined();
+  });
+
   it("ends with a plain message once everything is done", () => {
     expect(buildCompletionFollowUp({ completion: completed("Action 1"), tappedNumber: 1, actions: states([1, 2, 3]) })).toEqual({
       kind: "text",
       body: [
-        "✅ Saved! Action 1 is marked done:",
-        "1️⃣ Action 1",
+        "✅ Saved! Action 1 is marked done.",
         "",
         "🎉 Well done, you've completed all your actions! Keep the momentum going.",
       ].join("\n"),

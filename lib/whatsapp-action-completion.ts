@@ -4,16 +4,20 @@
  * open (Option A in docs/WHATSAPP_REMINDERS_PLAN.md):
  *
  *   reminder: 1️⃣ … 2️⃣ … 3️⃣ …   [Action 1 done] [Action 2 done] [Action 3 done]
- *   tap "Action 2 done" → "✅ Saved: 2️⃣ …  2 actions left: 1️⃣ 3️⃣"
+ *   tap "Action 2 done" → "✅ Saved! Action 2 is marked done.  2 actions left: 1️⃣ 3️⃣"
  *                          + [Action 1 done] [Action 3 done]
- *   tap "Action 3 done" → "✅ Saved: 3️⃣ …  1 action left: 1️⃣" + [Action 1 done]
- *   tap "Action 1 done" → "✅ Saved: 1️⃣ …  🎉 all done"
+ *   tap "Action 3 done" → "✅ Saved! Action 3 …  1 action left: 1️⃣" + [Action 1 done]
+ *   tap "Action 1 done" → "✅ Saved! Action 1 …  🎉 all done"
+ *
+ * The confirmation names only the number, not the title, so the reply lists
+ * just the actions still open.
  *
  * Every Done payload carries the whole reminder's action list plus which
  * number was tapped ("done:<n>:<id1>,<id2>,…", ids without dashes), so the
  * follow-ups keep the reminder's original numbering without storing anything.
  * Follow-ups are free-form interactive messages: the tap opened the 24-hour
- * window, so they need no template.
+ * window, so they need no template. While actions are left, the follow-up's
+ * header shows the next open action's illustration (actions.image_url).
  *
  * Settlement runs in complete_action_for_user
  * (supabase/migrations/085_complete_action_for_user.sql; 087 redefines it to
@@ -24,6 +28,7 @@
  */
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { getPointsForEvent } from "@/lib/points";
+import { whatsAppImageLink } from "@/lib/whatsapp-media";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -168,7 +173,13 @@ export async function completeActionFromWhatsApp(
   };
 }
 
-export type ReminderActionState = { number: number; id: string; title: string; done: boolean };
+export type ReminderActionState = {
+  number: number;
+  id: string;
+  title: string;
+  done: boolean;
+  imageUrl?: string | null;
+};
 
 /** The reminder's actions, in their original numbering, with which are done now. */
 export async function loadReminderActionStates(
@@ -177,19 +188,25 @@ export async function loadReminderActionStates(
   reminderActionIds: string[]
 ): Promise<ReminderActionState[]> {
   const [{ data: actions, error: actionError }, { data: userActions, error: userActionError }] = await Promise.all([
-    admin.from("actions").select("id, title").in("id", reminderActionIds),
+    admin.from("actions").select("id, title, image_url").in("id", reminderActionIds),
     admin.from("user_actions").select("action_id, status").eq("user_id", userId).in("action_id", reminderActionIds),
   ]);
   if (actionError || userActionError) {
     throw new Error(`load reminder actions: ${actionError?.message ?? userActionError?.message}`);
   }
-  const titles = new Map((actions ?? []).map((action) => [action.id as string, action.title as string]));
+  const actionById = new Map(
+    (actions ?? []).map((action) => [
+      action.id as string,
+      { title: action.title as string, imageUrl: (action.image_url as string | null) ?? null },
+    ])
+  );
   const statuses = new Map((userActions ?? []).map((row) => [row.action_id as string, row.status as string]));
   return reminderActionIds.map((id, index) => ({
     number: index + 1,
     id,
-    title: titles.get(id) ?? "Action",
+    title: actionById.get(id)?.title ?? "Action",
     done: statuses.get(id) === "success",
+    imageUrl: actionById.get(id)?.imageUrl ?? null,
   }));
 }
 
@@ -226,11 +243,12 @@ export function buildCompletionFollowUp(params: {
     };
   }
 
-  const tappedTitle = actions.find((action) => action.number === tappedNumber)?.title ?? completion.title;
+  // Only the number: repeating the done action's title next to the open list
+  // read like two lists.
   const lines =
     completion.outcome === "completed"
-      ? [`✅ Saved! Action ${tappedNumber} is marked done:`, `${numberEmoji(tappedNumber)} ${tappedTitle}`]
-      : [`👍 Action ${tappedNumber} was already marked done:`, `${numberEmoji(tappedNumber)} ${tappedTitle}`];
+      ? [`✅ Saved! Action ${tappedNumber} is marked done.`]
+      : [`👍 Action ${tappedNumber} was already marked done.`];
   // No points or Surprise Box lines: the reply only confirms the action (the
   // box still unlocks and shows in the app as usual).
   if (completion.outcome === "completed" && completion.completedLate) {
@@ -258,13 +276,18 @@ export function buildCompletionFollowUp(params: {
   return doneButtonsMessage(lines, actions);
 }
 
-/** `lines` as the body, with an "Action N done" reply button per open action. */
+/**
+ * `lines` as the body, with an "Action N done" reply button per open action
+ * and the first open action's illustration as the header, when it has one.
+ */
 function doneButtonsMessage(lines: string[], actions: ReminderActionState[]): FollowUpMessage {
   const allIds = actions.map((action) => action.id);
+  const imageLink = whatsAppImageLink(actions.find((action) => !action.done)?.imageUrl);
   return {
     kind: "interactive",
     interactive: {
       type: "button",
+      ...(imageLink ? { header: { type: "image", image: { link: imageLink } } } : {}),
       body: { text: truncate(lines.join("\n"), MAX_BODY) },
       action: {
         buttons: actions

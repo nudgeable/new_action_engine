@@ -152,8 +152,8 @@ line in the template itself: one UTILITY template per action count, chosen by
 - A tap arrives on the webhook; `lib/whatsapp-inbound.ts` maps the sender's
   number → participant (`whatsapp_contacts`), completes the action
   (`completeActionFromWhatsApp`) and replies, free-form (the tap opened the
-  24-hour window, no template): "✅ Saved! Action 2 is marked done" (no points
-  or Surprise Box line),
+  24-hour window, no template): "✅ Saved! Action 2 is marked done." (number only,
+  not the title, and no points or Surprise Box line),
   "2 actions left: 1️⃣ … 3️⃣ …" with [Action 1 done] [Action 3 done]; repeats per tap until
   "🎉 Well done, you've completed all your actions! Keep the momentum going." (`buildCompletionFollowUp`).
 - `supabase/migrations/085_complete_action_for_user.sql`:
@@ -204,3 +204,18 @@ line in the template itself: one UTILITY template per action count, chosen by
   reaches anyone with open actions who turned WhatsApp on after Friday's run.
 - Superadmin → WhatsApp reminders has a **Friday recap** switch: upcoming, Send
   now (`weekly_recap_manual`) and delivery history share the reminder views.
+
+### Action images on WhatsApp
+
+- **Reminders** — `plan_reminder_img_1…3`: the `plan_reminder_1…3` templates
+  (same UTILITY category, body, footer and buttons) plus an **IMAGE header**.
+  The header shows the first action's `actions.image_url`; a template can carry
+  only one image. Submitted 2026-11-13: `plan_reminder_img_1` (1169612178921419),
+  `plan_reminder_img_2` (2914789732231346), `plan_reminder_img_3`
+  (1097237556466568); all three approved as UTILITY the same day. A reminder
+  whose first action has no image gets the plain template.
+- **"Done" and recap "Some done" follow-ups** — free-form (24-hour window), so
+  no approval needed: while actions are left, the interactive message's header
+  is the next open action's image. Live as soon as deployed.
+- Images must be public https JPEG/PNG ≤ 5 MB; the `action-images` bucket is
+  public PNG at ~200 KB.
