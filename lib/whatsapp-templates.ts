@@ -70,8 +70,17 @@
  * plan_recap_1 is singular and unnumbered, with one "Action done" button that
  * works like a reminder's. Two buttons rather than one per action plus "All
  * done": four buttons would collapse behind "See all options".
+ *
+ * IMAGE VARIANTS. plan_reminder_img_1 … plan_reminder_img_3 are the same
+ * templates (same category, body, footer and buttons) plus an IMAGE header,
+ * which shows the first action's illustration (actions.image_url). A template
+ * message can carry only one image, so the other actions stay text-only.
+ * They are used only when WHATSAPP_IMAGE_TEMPLATES=1 (set it once Meta has
+ * approved all three — sending an unapproved template fails) and the first
+ * action has an image; otherwise the plain template above is sent.
  */
 import { doneButtonPayload, recapAllPayload, recapSomePayload } from "@/lib/whatsapp-action-completion";
+import { whatsAppImageLink } from "@/lib/whatsapp-media";
 
 export const ACTION_REMINDER_LANGUAGE = "en";
 /** Equals MAX_WEEKLY_ACTIONS in lib/personal-action-generation.ts. */
@@ -81,12 +90,18 @@ function templateSlots(actionCount: number): number {
   return Math.min(Math.max(actionCount, 1), MAX_ACTIONS_PER_TEMPLATE);
 }
 
-export function actionReminderTemplateName(actionCount: number): string {
-  return `plan_reminder_${templateSlots(actionCount)}`;
+export function actionReminderTemplateName(actionCount: number, withImage = false): string {
+  const slots = templateSlots(actionCount);
+  return withImage ? `plan_reminder_img_${slots}` : `plan_reminder_${slots}`;
 }
 
 export function weeklyRecapTemplateName(actionCount: number): string {
   return `plan_recap_${templateSlots(actionCount)}`;
+}
+
+/** True once the plan_reminder_img_* templates are approved and switched on. */
+export function areImageTemplatesEnabled(): boolean {
+  return process.env.WHATSAPP_IMAGE_TEMPLATES === "1";
 }
 
 /** Template parameters can't contain newlines/tabs or 4+ consecutive spaces. */
@@ -114,6 +129,7 @@ export function actionLines(titles: string[]): string[] {
 }
 
 export type TemplateComponent =
+  | { type: "header"; parameters: { type: "image"; image: { link: string } }[] }
   | { type: "body"; parameters: { type: "text"; text: string }[] }
   | { type: "button"; sub_type: "quick_reply"; index: string; parameters: { type: "payload"; payload: string }[] };
 
@@ -132,10 +148,13 @@ export function buildActionReminder(params: {
   /** "from your {{company}} plan"; falls back to "Nudgeable". */
   companyName: string | null;
   track: "daily" | "weekly";
-  actions: { id: string; title: string }[];
+  actions: { id: string; title: string; imageUrl?: string | null }[];
+  /** Use the plan_reminder_img_* variant when the first action has an image. */
+  withImage?: boolean;
 }): TemplateMessage {
   if (!params.actions.length) throw new Error("An action reminder needs at least one action");
   const lines = actionLines(params.actions.map((action) => action.title));
+  const imageLink = params.withImage ? whatsAppImageLink(params.actions[0].imageUrl) : null;
   const buttonActionIds = params.actions.slice(0, lines.length).map((action) => action.id);
   const doneButtons = buttonActionIds.map(
     (_actionId, index): TemplateComponent => ({
@@ -146,8 +165,11 @@ export function buildActionReminder(params: {
     })
   );
   return {
-    template: { name: actionReminderTemplateName(lines.length), language: ACTION_REMINDER_LANGUAGE },
+    template: { name: actionReminderTemplateName(lines.length, !!imageLink), language: ACTION_REMINDER_LANGUAGE },
     components: [
+      ...(imageLink
+        ? [{ type: "header" as const, parameters: [{ type: "image" as const, image: { link: imageLink } }] }]
+        : []),
       {
         type: "body",
         parameters: [
